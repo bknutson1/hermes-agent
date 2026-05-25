@@ -28,6 +28,8 @@ GITHUB_PR_URL_RE = re.compile(
 
 _PR_STATUS_CACHE: dict[str, tuple[float, Optional["PullRequestInfo"]]] = {}
 _PR_STATUS_CACHE_TTL = 60.0
+# When scanning runs for PR URLs, only inspect recent rows per task (board load).
+_PR_DISCOVERY_RUNS_PER_TASK = 16
 PR_MERGED_SUMMARY_PREFIX = "PR Merged into "
 
 
@@ -130,6 +132,16 @@ def _pr_label(*, state: str, merged: bool, draft: bool) -> str:
     if state == "closed":
         return "Closed"
     return state.capitalize() if state else "Unknown"
+
+
+def cached_pull_request_info(url: str) -> Optional[PullRequestInfo]:
+    """Return cached PR state when fresh; never hits the network."""
+    normalized = normalize_github_pr_url(url)
+    now = time.time()
+    cached = _PR_STATUS_CACHE.get(normalized)
+    if cached and now - cached[0] < _PR_STATUS_CACHE_TTL:
+        return cached[1]
+    return None
 
 
 def invalidate_pr_status_cache(url: Optional[str] = None) -> None:
@@ -253,6 +265,7 @@ def find_pr_urls_for_tasks(
         SELECT task_id, body
           FROM task_comments
          WHERE task_id IN ({placeholders})
+           AND body LIKE '%github.com%/pull/%'
          ORDER BY created_at DESC
         """,
         tuple(ids),
@@ -271,11 +284,18 @@ def find_pr_urls_for_tasks(
         run_rows = conn.execute(
             f"""
             SELECT task_id, summary, metadata
-              FROM task_runs
-             WHERE task_id IN ({run_placeholders})
-             ORDER BY COALESCE(ended_at, started_at) DESC, id DESC
+              FROM (
+                SELECT task_id, summary, metadata,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY task_id
+                         ORDER BY COALESCE(ended_at, started_at) DESC, id DESC
+                       ) AS rn
+                  FROM task_runs
+                 WHERE task_id IN ({run_placeholders})
+              )
+             WHERE rn <= ?
             """,
-            tuple(remaining),
+            tuple(remaining) + (_PR_DISCOVERY_RUNS_PER_TASK,),
         ).fetchall()
         seen_runs: set[str] = set()
         for row in run_rows:
@@ -360,6 +380,7 @@ def attach_pr_status_to_task_dicts(
     task_dicts: list[dict[str, Any]],
     *,
     fetch_live: bool = True,
+    cache_only: bool = False,
 ) -> None:
     """Mutate task dicts in place, adding a ``pr`` field when applicable."""
     if not task_dicts:
@@ -371,7 +392,10 @@ def attach_pr_status_to_task_dicts(
     info_by_url: dict[str, Optional[PullRequestInfo]] = {}
     if fetch_live:
         for url in set(urls.values()):
-            info_by_url[url] = fetch_pull_request_info(url)
+            if cache_only:
+                info_by_url[url] = cached_pull_request_info(url)
+            else:
+                info_by_url[url] = fetch_pull_request_info(url)
 
     for d in task_dicts:
         url = urls.get(d["id"])

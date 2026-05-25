@@ -144,12 +144,21 @@ BOARD_COLUMNS: list[str] = [
 
 
 _CARD_SUMMARY_PREVIEW_CHARS = 200
+_CARD_BODY_PREVIEW_CHARS = 200
+
+# Per-task caps when computing diagnostics for GET /board. Rules only
+# inspect recent runs (crash/failure streaks) and recent events (block/
+# ready transitions, active hallucination markers). Full history stays on
+# GET /tasks/:id and /diagnostics.
+_DIAG_RUNS_PER_TASK = 64
+_DIAG_EVENTS_PER_TASK = 256
 
 
 def _task_dict(
     task: kanban_db.Task,
     *,
     latest_summary: Optional[str] = None,
+    for_board: bool = False,
 ) -> dict[str, Any]:
     d = asdict(task)
     # Add derived age metrics so the UI can colour stale cards without
@@ -164,6 +173,10 @@ def _task_dict(
     # ``tasks.result``. ``None`` when no run has produced a summary yet.
     d["latest_summary"] = latest_summary
     # Keep body short on list endpoints; full body comes from /tasks/:id.
+    if for_board:
+        body = d.get("body") or ""
+        if len(body) > _CARD_BODY_PREVIEW_CHARS:
+            d["body"] = body[:_CARD_BODY_PREVIEW_CHARS]
     return d
 
 
@@ -256,22 +269,28 @@ def _compute_task_diagnostics(
     if not rows:
         return {}
 
-    # Index events + runs by task id. For very large boards this will
-    # slurp a lot — acceptable on the dashboard's typical working set
-    # (hundreds of tasks), but we can add pagination / filtering later
-    # if profiling shows it's a hotspot.
+    # Index recent events + runs per task (bounded). Diagnostic rules only
+    # need trailing run outcomes and recent status transitions — not full
+    # audit history. Keeps GET /board O(tasks * cap) instead of O(all rows).
     row_ids = [r["id"] for r in rows]
     placeholders = ",".join(["?"] * len(row_ids))
+    id_params: tuple[Any, ...] = tuple(row_ids)
     events_by_task: dict[str, list] = {tid: [] for tid in row_ids}
     for ev_row in conn.execute(
-        f"SELECT * FROM task_events WHERE task_id IN ({placeholders}) ORDER BY id",
-        tuple(row_ids),
+        f"SELECT * FROM ("
+        f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY task_id ORDER BY id DESC) AS rn"
+        f"  FROM task_events WHERE task_id IN ({placeholders})"
+        f") WHERE rn <= ? ORDER BY task_id, id",
+        id_params + (_DIAG_EVENTS_PER_TASK,),
     ).fetchall():
         events_by_task.setdefault(ev_row["task_id"], []).append(ev_row)
     runs_by_task: dict[str, list] = {tid: [] for tid in row_ids}
     for run_row in conn.execute(
-        f"SELECT * FROM task_runs WHERE task_id IN ({placeholders}) ORDER BY id",
-        tuple(row_ids),
+        f"SELECT * FROM ("
+        f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY task_id ORDER BY id DESC) AS rn"
+        f"  FROM task_runs WHERE task_id IN ({placeholders})"
+        f") WHERE rn <= ? ORDER BY task_id, id",
+        id_params + (_DIAG_RUNS_PER_TASK,),
     ).fetchall():
         runs_by_task.setdefault(run_row["task_id"], []).append(run_row)
 
@@ -375,10 +394,8 @@ def get_board(
     board = _resolve_board(board)
     conn = _conn(board=board)
     try:
-        try:
-            kanban_pr.sync_merged_pull_requests(conn)
-        except Exception:
-            log.debug("PR merge sync failed on board load", exc_info=True)
+        # PR merge auto-complete runs on the dispatcher tick (kanban_db.dispatch);
+        # do not block GET /board with force_refresh GitHub calls per open task.
 
         tasks = kanban_db.list_tasks(
             conn,
@@ -420,10 +437,10 @@ def get_board(
             if row["cstatus"] == "done":
                 p["done"] += 1
 
-        # Diagnostics rollup for this board — see kanban_diagnostics.
-        # We get the full structured list per task AND a compact
-        # summary for the card badge (so cards don't carry the detail
-        # text; the drawer fetches that via /tasks/:id or /diagnostics).
+        # Diagnostics rollup for card badges — compact ``warnings`` only.
+        # Full diagnostic objects (titles, details, recovery actions) are
+        # deferred to GET /tasks/:id and GET /diagnostics so /board stays
+        # small on boards with hundreds of tasks.
         diagnostics_per_task = _compute_task_diagnostics(conn, task_ids=None)
 
         latest_event_id = conn.execute(
@@ -446,23 +463,22 @@ def get_board(
             preview = (
                 full[:_CARD_SUMMARY_PREVIEW_CHARS] if full else None
             )
-            d = _task_dict(t, latest_summary=preview)
+            d = _task_dict(t, latest_summary=preview, for_board=True)
             d["link_counts"] = link_counts.get(t.id, {"parents": 0, "children": 0})
             d["comment_count"] = comment_counts.get(t.id, 0)
             d["progress"] = progress.get(t.id)  # None when the task has no children
             diags = diagnostics_per_task.get(t.id)
             if diags:
-                # Full list goes into the payload so the drawer can render
-                # without a second round-trip. The board-level badge only
-                # needs the summary.
-                d["diagnostics"] = diags
                 d["warnings"] = _warnings_summary_from_diagnostics(diags)
             col = t.status if t.status in columns else "todo"
             columns[col].append(d)
             board_task_dicts.append(d)
 
         try:
-            kanban_pr.attach_pr_status_to_task_dicts(conn, board_task_dicts)
+            # Use in-process cache only — live GitHub fetch happens on GET /tasks/:id.
+            kanban_pr.attach_pr_status_to_task_dicts(
+                conn, board_task_dicts, fetch_live=True, cache_only=True,
+            )
         except Exception:
             log.debug("PR status enrichment failed", exc_info=True)
 

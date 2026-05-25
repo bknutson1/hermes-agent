@@ -1896,10 +1896,12 @@ def test_board_surfaces_warnings_field_for_hallucinated_completions(client):
     assert w["count"] >= 1
     assert "hallucinated_cards" in w["kinds"]
     assert w["highest_severity"] == "error"
-    # Full diagnostic list also on the payload for drawer rendering.
-    assert parent_dict.get("diagnostics") is not None
-    assert parent_dict["diagnostics"][0]["kind"] == "hallucinated_cards"
-    assert "t_deadbeefcafe" in parent_dict["diagnostics"][0]["data"]["phantom_ids"]
+    # Full diagnostics are deferred to the per-task endpoint (drawer fetch).
+    assert "diagnostics" not in parent_dict
+    detail = client.get(f"/api/plugins/kanban/tasks/{parent_dict['id']}").json()["task"]
+    assert detail.get("diagnostics") is not None
+    assert detail["diagnostics"][0]["kind"] == "hallucinated_cards"
+    assert "t_deadbeefcafe" in detail["diagnostics"][0]["data"]["phantom_ids"]
 
 
 def test_board_warnings_cleared_after_clean_completion(client):
@@ -2159,10 +2161,10 @@ def test_diagnostics_endpoint_severity_filter(client):
     assert data["diagnostics"][0]["task_id"] == p2
 
 
-def test_board_exposes_diagnostics_list_and_summary(client):
-    """/board should attach both the full diagnostics list AND the
-    compact warnings summary (with highest_severity) on each task
-    that has any diagnostic.
+def test_board_exposes_warnings_summary_not_full_diagnostics(client):
+    """/board should attach the compact warnings summary (with
+    highest_severity) on each task that has any diagnostic, but not
+    the full diagnostics list (that lives on GET /tasks/:id).
     """
     conn = kb.connect()
     try:
@@ -2184,7 +2186,9 @@ def test_board_exposes_diagnostics_list_and_summary(client):
     task_dict = next(x for x in tasks if x["title"] == "crashy")
     assert task_dict["warnings"] is not None
     assert task_dict["warnings"]["highest_severity"] == "error"
-    assert task_dict["diagnostics"][0]["kind"] == "repeated_crashes"
+    assert "diagnostics" not in task_dict
+    detail = client.get(f"/api/plugins/kanban/tasks/{task_dict['id']}").json()["task"]
+    assert detail["diagnostics"][0]["kind"] == "repeated_crashes"
 
 
 # ---------------------------------------------------------------------------
@@ -2427,8 +2431,7 @@ def test_board_includes_pr_status(client, monkeypatch):
         target_branch="main",
         label="Open",
     )
-    monkeypatch.setattr(kp, "fetch_pull_request_info", lambda url: open_pr)
-    monkeypatch.setattr(kp, "sync_merged_pull_requests", lambda conn: [])
+    kp._cache_pr_status(open_pr.url, open_pr)
 
     r = client.get("/api/plugins/kanban/board")
     assert r.status_code == 200
@@ -2516,3 +2519,73 @@ def test_custom_commands_crud_and_run(client, tmp_path, monkeypatch):
         json={"command_id": "cmd_echo"},
     )
     assert r_missing.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /board performance — large boards
+# ---------------------------------------------------------------------------
+
+
+def test_board_does_not_sync_merged_prs_on_load(client, monkeypatch):
+    """GET /board must not call sync_merged_pull_requests (dispatcher owns that)."""
+    from hermes_cli import kanban_pr as kp
+
+    def _boom(conn):
+        raise AssertionError("sync_merged_pull_requests must not run on /board")
+
+    monkeypatch.setattr(kp, "sync_merged_pull_requests", _boom)
+    r = client.get("/api/plugins/kanban/board")
+    assert r.status_code == 200
+
+
+def test_board_large_board_bounded_payload(client):
+    """GET /board stays bounded on boards with 100+ tasks: truncated bodies,
+    warnings-only diagnostics, and capped event/run reads for rule eval.
+    """
+    big_body = "B" * 8000
+    n_tasks = 120
+    conn = kb.connect()
+    try:
+        now = int(time.time())
+        for i in range(n_tasks):
+            tid = kb.create_task(
+                conn,
+                title=f"bulk-{i}",
+                body=big_body,
+                assignee="worker",
+            )
+            for j in range(3):
+                conn.execute(
+                    "INSERT INTO task_events (task_id, kind, payload, created_at) "
+                    "VALUES (?, 'commented', '{}', ?)",
+                    (tid, now - 1000 + j),
+                )
+            for k in range(2):
+                conn.execute(
+                    "INSERT INTO task_runs (task_id, status, outcome, started_at, ended_at) "
+                    "VALUES (?, 'crashed', 'crashed', ?, ?)",
+                    (tid, now - 400 - k * 50, now - 300 - k * 50),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+
+    t0 = time.perf_counter()
+    r = client.get("/api/plugins/kanban/board")
+    elapsed = time.perf_counter() - t0
+    assert r.status_code == 200
+    assert elapsed < 5.0, f"/board took {elapsed:.2f}s on {n_tasks} seeded tasks"
+
+    payload_bytes = len(r.content)
+    # ~120 tasks × (200-char body + metadata) should stay well under 2 MiB.
+    assert payload_bytes < 2_000_000, (
+        f"/board payload {payload_bytes} bytes exceeds 2 MiB cap"
+    )
+
+    tasks = [t for col in r.json()["columns"] for t in col["tasks"]]
+    assert len(tasks) == n_tasks
+    for t in tasks:
+        assert "diagnostics" not in t
+        assert len(t.get("body") or "") <= 200
+    warned = [t for t in tasks if t.get("warnings")]
+    assert len(warned) >= 1
