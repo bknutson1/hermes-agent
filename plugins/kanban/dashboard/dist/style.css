@@ -623,11 +623,13 @@
 }
 
 .hermes-kanban-comment {
-  border-left: 2px solid color-mix(in srgb, var(--color-ring) 35%, transparent);
-  padding-left: 0.5rem;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: var(--radius-md, 0.375rem);
+  border: 1px solid color-mix(in srgb, var(--color-border) 85%, transparent);
+  background: color-mix(in srgb, var(--color-card) 92%, transparent);
 }
 
 .hermes-kanban-comment-head {
@@ -641,6 +643,78 @@
 }
 .hermes-kanban-comment-ago {
   color: var(--color-muted-foreground);
+}
+
+/* Per-author comment cards (profile / dashboard reviewer). */
+.hermes-kanban-comment--default {
+  background: color-mix(in srgb, #4a8fd4 14%, var(--color-card));
+  border-color: color-mix(in srgb, #4a8fd4 38%, var(--color-border));
+}
+.hermes-kanban-comment--default .hermes-kanban-comment-author {
+  color: color-mix(in srgb, #7eb8f0 88%, var(--color-foreground));
+}
+
+.hermes-kanban-comment--dashboard {
+  background: color-mix(in srgb, #d4a348 16%, var(--color-card));
+  border-color: color-mix(in srgb, #d4a348 42%, var(--color-border));
+}
+.hermes-kanban-comment--dashboard .hermes-kanban-comment-author {
+  color: color-mix(in srgb, #f0c878 90%, var(--color-foreground));
+}
+
+.hermes-kanban-comment--worker {
+  background: color-mix(in srgb, #6bb87a 14%, var(--color-card));
+  border-color: color-mix(in srgb, #6bb87a 38%, var(--color-border));
+}
+.hermes-kanban-comment--worker .hermes-kanban-comment-author {
+  color: color-mix(in srgb, #8ed89a 88%, var(--color-foreground));
+}
+
+.hermes-kanban-comment--system {
+  background: color-mix(in srgb, #9a7ad4 14%, var(--color-card));
+  border-color: color-mix(in srgb, #9a7ad4 38%, var(--color-border));
+}
+.hermes-kanban-comment--system .hermes-kanban-comment-author {
+  color: color-mix(in srgb, #c4a8f0 88%, var(--color-foreground));
+}
+
+.hermes-kanban-comment--anon {
+  background: color-mix(in srgb, var(--color-muted) 35%, var(--color-card));
+  border-color: color-mix(in srgb, var(--color-border) 90%, transparent);
+}
+
+/* Hash-stable palette for other profile names. */
+.hermes-kanban-comment--palette-0 {
+  background: color-mix(in srgb, #4a8fd4 12%, var(--color-card));
+  border-color: color-mix(in srgb, #4a8fd4 34%, var(--color-border));
+}
+.hermes-kanban-comment--palette-1 {
+  background: color-mix(in srgb, #6bb87a 12%, var(--color-card));
+  border-color: color-mix(in srgb, #6bb87a 34%, var(--color-border));
+}
+.hermes-kanban-comment--palette-2 {
+  background: color-mix(in srgb, #d4a348 12%, var(--color-card));
+  border-color: color-mix(in srgb, #d4a348 34%, var(--color-border));
+}
+.hermes-kanban-comment--palette-3 {
+  background: color-mix(in srgb, #d46b8f 12%, var(--color-card));
+  border-color: color-mix(in srgb, #d46b8f 34%, var(--color-border));
+}
+.hermes-kanban-comment--palette-4 {
+  background: color-mix(in srgb, #9a7ad4 12%, var(--color-card));
+  border-color: color-mix(in srgb, #9a7ad4 34%, var(--color-border));
+}
+.hermes-kanban-comment--palette-5 {
+  background: color-mix(in srgb, #48b8b8 12%, var(--color-card));
+  border-color: color-mix(in srgb, #48b8b8 34%, var(--color-border));
+}
+.hermes-kanban-comment--palette-6 {
+  background: color-mix(in srgb, #d48a4a 12%, var(--color-card));
+  border-color: color-mix(in srgb, #d48a4a 34%, var(--color-border));
+}
+.hermes-kanban-comment--palette-7 {
+  background: color-mix(in srgb, #7a9ad4 12%, var(--color-card));
+  border-color: color-mix(in srgb, #7a9ad4 34%, var(--color-border));
 }
 
 .hermes-kanban-event {

@@ -86,6 +86,41 @@
     return body || raw;
   }
 
+  // Stable card color per comment author (Hermes profile or dashboard user).
+  const COMMENT_AUTHOR_ALIASES = {
+    default: "default",
+    dashboard: "dashboard",
+    worker: "worker",
+    "hermes-system": "system",
+    system: "system",
+  };
+  const COMMENT_AUTHOR_KNOWN = new Set([
+    "default", "dashboard", "worker", "system", "anon",
+  ]);
+
+  function commentAuthorSlug(author) {
+    const raw = String(author || "anon").trim().toLowerCase();
+    if (COMMENT_AUTHOR_ALIASES[raw]) return COMMENT_AUTHOR_ALIASES[raw];
+    const slug = raw.replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+    return slug || "anon";
+  }
+
+  function commentAuthorHueIndex(slug) {
+    let h = 0;
+    for (let i = 0; i < slug.length; i++) {
+      h = ((h << 5) - h + slug.charCodeAt(i)) | 0;
+    }
+    return Math.abs(h) % 8;
+  }
+
+  function commentAuthorClass(author) {
+    const slug = commentAuthorSlug(author);
+    if (COMMENT_AUTHOR_KNOWN.has(slug)) {
+      return "hermes-kanban-comment--" + slug;
+    }
+    return "hermes-kanban-comment--palette-" + commentAuthorHueIndex(slug);
+  }
+
   // Order matches BOARD_COLUMNS in plugin_api.py.
   const COLUMN_ORDER = ["triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done"];
   // English fallback dictionaries — used when the i18n catalog is missing
@@ -3552,7 +3587,10 @@
           ? h("div", { className: "text-xs text-muted-foreground" },
               tx(i18n, "noComments", "— no comments —"))
           : comments.map(function (c) {
-              return h("div", { key: c.id, className: "hermes-kanban-comment" },
+              return h("div", {
+                key: c.id,
+                className: cn("hermes-kanban-comment", commentAuthorClass(c.author)),
+              },
                 h("div", { className: "hermes-kanban-comment-head" },
                   h("span", { className: "hermes-kanban-comment-author" }, c.author || "anon"),
                   h("span", { className: "hermes-kanban-comment-ago" },
