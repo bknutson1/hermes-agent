@@ -3310,14 +3310,22 @@ def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
     the leaked run is closed as ``reclaimed`` inside the same txn so the
     runs invariant (``current_run_id IS NULL`` ⇔ run row in terminal
     state) holds for the rest of this function's lifetime.
+
+    Emits ``reopened`` so dispatch respawn guards (``active_pr``,
+    ``recent_success``) honour operator intent to continue on the existing
+    workspace / PR thread after review or other human follow-up.
     """
     now = int(time.time())
     with write_txn(conn):
-        stale = conn.execute(
-            "SELECT current_run_id FROM tasks WHERE id = ? AND status IN ('blocked', 'scheduled')",
+        prev = conn.execute(
+            "SELECT status, current_run_id FROM tasks "
+            "WHERE id = ? AND status IN ('blocked', 'scheduled')",
             (task_id,),
         ).fetchone()
-        if stale and stale["current_run_id"]:
+        if prev is None:
+            return False
+        from_status = prev["status"]
+        if prev["current_run_id"]:
             conn.execute(
                 """
                 UPDATE task_runs
@@ -3327,7 +3335,7 @@ def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
                        claim_lock = NULL, claim_expires = NULL, worker_pid = NULL
                  WHERE id = ? AND ended_at IS NULL
                 """,
-                (now, int(stale["current_run_id"])),
+                (now, int(prev["current_run_id"])),
             )
         # Re-gate on parent completion before flipping 'blocked' back to
         # 'ready'. Unconditionally setting status='ready' here bypasses the
@@ -3353,6 +3361,13 @@ def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
         _append_event(
             conn, task_id, "unblocked",
             {"status": new_status} if new_status != "ready" else None,
+        )
+        record_operator_reopen(
+            conn,
+            task_id,
+            from_status=from_status,
+            to_status=new_status,
+            reason="unblock",
         )
         return True
 
@@ -4922,7 +4937,8 @@ def record_operator_reopen(
     """Record that an operator intentionally re-queued work on this task.
 
     Dispatch respawn guards (``recent_success``, ``active_pr``) honour this
-    so follow-up instructions on a completed card can spawn a new worker.
+    so follow-up instructions on a completed card or an unblocked review
+    handoff can spawn a new worker.
     """
     _append_event(
         conn,
@@ -4964,6 +4980,9 @@ def check_respawn_guard(conn: sqlite3.Connection, task_id: str) -> Optional[str]
         A GitHub PR URL appears in a recent task comment (within
         ``_RESPAWN_GUARD_PR_WINDOW`` seconds).  A prior worker already
         opened a PR; re-spawning risks a duplicate PR on the same task.
+        Cleared by ``unblock_task`` / dashboard unblock (emits
+        ``reopened``) or by moving a card from ``done``/``archived`` back
+        to an active column.
 
     Stale / dead claim locks are NOT a guard reason — they are handled
     by ``release_stale_claims`` and ``detect_crashed_workers`` which

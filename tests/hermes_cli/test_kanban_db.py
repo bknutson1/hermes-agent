@@ -1485,6 +1485,55 @@ def test_dispatch_respawn_guard_skips_recent_success(
         assert kb.get_task(conn, t).status == "ready"  # not blocked, just skipped
 
 
+def test_unblock_clears_active_pr_respawn_guard(
+    kanban_home, all_assignees_spawnable,
+):
+    """Operator unblock after review handoff clears active_pr and allows spawn."""
+    spawned_ids = []
+
+    def fake_spawn(task, workspace):
+        spawned_ids.append(task.id)
+
+    with kb.connect() as conn:
+        t = kb.create_task(conn, title="review-handoff", assignee="alice")
+        kb.add_comment(
+            conn, t, "worker",
+            "PR: https://github.com/org/repo/pull/42",
+        )
+        kb.block_task(conn, t, reason="review-required: needs eyes")
+        assert kb.unblock_task(conn, t)
+        assert kb.check_respawn_guard(conn, t) is None
+        kinds = [
+            row["kind"]
+            for row in conn.execute(
+                "SELECT kind FROM task_events WHERE task_id = ? ORDER BY id",
+                (t,),
+            ).fetchall()
+        ]
+        assert "reopened" in kinds
+        res = kb.dispatch_once(conn, spawn_fn=fake_spawn)
+
+    assert t in spawned_ids
+    assert (t, "active_pr") not in res.respawn_guarded
+
+
+def test_unblock_clears_recent_success_respawn_guard(kanban_home):
+    """Operator unblock clears recent_success so rework can respawn."""
+    with kb.connect() as conn:
+        t = kb.create_task(conn, title="review-done", assignee="alice")
+        now = int(time.time())
+        completed_at = now - 60
+        conn.execute(
+            "INSERT INTO task_runs (task_id, status, outcome, started_at, ended_at) "
+            "VALUES (?, 'done', 'completed', ?, ?)",
+            (t, completed_at - 120, completed_at),
+        )
+        assert kb.check_respawn_guard(conn, t) == "recent_success"
+        kb.block_task(conn, t, reason="review-required: hold")
+        assert kb.unblock_task(conn, t)
+        assert kb.check_respawn_guard(conn, t) is None
+
+
 def test_dispatch_respawn_guard_skips_active_pr(
     kanban_home, all_assignees_spawnable
 ):

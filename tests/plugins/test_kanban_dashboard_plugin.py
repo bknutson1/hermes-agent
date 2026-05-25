@@ -490,6 +490,8 @@ def test_patch_done_to_ready_records_operator_reopen(client):
 
 
 def test_patch_block_then_unblock(client):
+    from hermes_cli import kanban_db as kb
+
     t = client.post("/api/plugins/kanban/tasks", json={"title": "x"}).json()["task"]
     r = client.patch(
         f"/api/plugins/kanban/tasks/{t['id']}",
@@ -498,12 +500,29 @@ def test_patch_block_then_unblock(client):
     assert r.status_code == 200
     assert r.json()["task"]["status"] == "blocked"
 
+    with kb.connect() as conn:
+        kb.add_comment(
+            conn, t["id"], "worker",
+            "https://github.com/org/repo/pull/7",
+        )
+
     r = client.patch(
         f"/api/plugins/kanban/tasks/{t['id']}",
         json={"status": "ready"},
     )
     assert r.status_code == 200
     assert r.json()["task"]["status"] == "ready"
+
+    with kb.connect() as conn:
+        assert kb.check_respawn_guard(conn, t["id"]) is None
+        kinds = [
+            row["kind"]
+            for row in conn.execute(
+                "SELECT kind FROM task_events WHERE task_id = ? ORDER BY id",
+                (t["id"],),
+            ).fetchall()
+        ]
+        assert "reopened" in kinds
 
 
 def test_patch_schedule_then_unblock(client):
