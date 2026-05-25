@@ -9,6 +9,42 @@ from typing import Any, Dict, List
 logger = logging.getLogger(__name__)
 
 _CURSOR_TURN_SEPARATOR = "\n\n---\n\n"
+_CURSOR_TURN_MAX_ATTEMPTS = 2
+
+
+def _retire_cursor_session(agent) -> None:
+    """Close and drop the lazy Cursor SDK session so the next turn respawns."""
+    session = getattr(agent, "_cursor_session", None)
+    if session is None:
+        return
+    try:
+        session.close()
+    except Exception:
+        pass
+    agent._cursor_session = None
+
+
+def _ensure_cursor_sdk_session(agent, *, progress_callback, tool_progress_callback) -> None:
+    """Lazy-create ``CursorSDKSession`` on the agent (mirrors codex path)."""
+    if getattr(agent, "_cursor_session", None) is not None:
+        session = agent._cursor_session
+        if progress_callback is not None:
+            session._progress_callback = progress_callback
+        session._tool_progress_callback = tool_progress_callback
+        return
+
+    from agent.transports.cursor_sdk_session import CursorSDKSession
+
+    cwd = getattr(agent, "session_cwd", None) or os.getcwd()
+    api_key = getattr(agent, "api_key", None) or os.environ.get("CURSOR_API_KEY")
+    model = getattr(agent, "model", None) or "composer-2.5"
+    agent._cursor_session = CursorSDKSession(
+        cwd=cwd,
+        api_key=api_key,
+        model=model,
+        progress_callback=progress_callback,
+        tool_progress_callback=tool_progress_callback,
+    )
 
 
 def effective_system_prompt(agent) -> str:
@@ -75,69 +111,106 @@ def run_cursor_sdk_turn(
             "interrupted": False,
         }
 
-    if not hasattr(agent, "_cursor_session") or agent._cursor_session is None:
-        cwd = getattr(agent, "session_cwd", None) or os.getcwd()
-        api_key = getattr(agent, "api_key", None) or os.environ.get("CURSOR_API_KEY")
-        model = getattr(agent, "model", None) or "composer-2.5"
-        agent._cursor_session = CursorSDKSession(
-            cwd=cwd,
-            api_key=api_key,
-            model=model,
-            progress_callback=progress_callback,
-            tool_progress_callback=tool_progress_callback,
-        )
-    else:
-        if progress_callback is not None:
-            agent._cursor_session._progress_callback = progress_callback
-        agent._cursor_session._tool_progress_callback = tool_progress_callback
-
-    # Cursor SDK has no system-role channel. The Hermes system prompt (skills,
-    # kanban lifecycle, tool guidance) is prepended on the first turn of each
-    # CursorSDKSession so workers see the same contract as chat-completions
-    # runtimes. Subsequent turns on the same session omit it to avoid bloat.
-    session = agent._cursor_session
-    inject_system = getattr(session, "_turns_sent", 0) == 0
-    prompt = compose_cursor_user_input(
+    _ensure_cursor_sdk_session(
         agent,
-        user_message,
-        inject_system=inject_system,
+        progress_callback=progress_callback,
+        tool_progress_callback=tool_progress_callback,
     )
-    logger.info(
-        "cursor SDK turn starting session=%s model=%s inject_system=%s",
-        getattr(agent, "session_id", None) or "none",
-        getattr(agent, "model", None) or "composer-2.5",
-        inject_system,
-    )
-    try:
-        turn = agent._cursor_session.run_turn(user_input=prompt)
-        session._turns_sent = getattr(session, "_turns_sent", 0) + 1
-    except Exception as exc:
-        logger.exception("cursor SDK turn failed")
+
+    turn = None
+    for attempt in range(_CURSOR_TURN_MAX_ATTEMPTS):
+        session = agent._cursor_session
+        if session.should_proactively_retire():
+            logger.info(
+                "cursor SDK session past max age (%.0fs), retiring before turn",
+                session.session_age_seconds(),
+            )
+            _retire_cursor_session(agent)
+            _ensure_cursor_sdk_session(
+                agent,
+                progress_callback=progress_callback,
+                tool_progress_callback=tool_progress_callback,
+            )
+            session = agent._cursor_session
+
+        # Cursor SDK has no system-role channel. The Hermes system prompt (skills,
+        # kanban lifecycle, tool guidance) is prepended on the first turn of each
+        # CursorSDKSession so workers see the same contract as chat-completions
+        # runtimes. Subsequent turns on the same session omit it to avoid bloat.
+        inject_system = getattr(session, "_turns_sent", 0) == 0
+        prompt = compose_cursor_user_input(
+            agent,
+            user_message,
+            inject_system=inject_system,
+        )
+        logger.info(
+            "cursor SDK turn starting session=%s model=%s inject_system=%s attempt=%d",
+            getattr(agent, "session_id", None) or "none",
+            getattr(agent, "model", None) or "composer-2.5",
+            inject_system,
+            attempt + 1,
+        )
         try:
-            agent._cursor_session.close()
-        except Exception:
-            pass
-        agent._cursor_session = None
+            turn = session.run_turn(user_input=prompt)
+            session._turns_sent = getattr(session, "_turns_sent", 0) + 1
+        except Exception as exc:
+            logger.exception("cursor SDK turn failed")
+            _retire_cursor_session(agent)
+            if attempt + 1 < _CURSOR_TURN_MAX_ATTEMPTS:
+                logger.warning(
+                    "cursor SDK turn crashed, retrying with fresh session: %s", exc
+                )
+                _ensure_cursor_sdk_session(
+                    agent,
+                    progress_callback=progress_callback,
+                    tool_progress_callback=tool_progress_callback,
+                )
+                continue
+            return {
+                "final_response": (
+                    f"Cursor SDK turn failed: {exc}. "
+                    "Check CURSOR_API_KEY and pip install cursor-sdk."
+                ),
+                "messages": messages,
+                "api_calls": 0,
+                "completed": False,
+                "partial": True,
+                "error": str(exc),
+                "interrupted": bool(
+                    getattr(agent, "_interrupt_requested", False)
+                ),
+            }
+
+        if getattr(turn, "should_retire", False):
+            logger.warning("cursor SDK session retired (error: %s)", turn.error)
+            _retire_cursor_session(agent)
+            if (
+                attempt + 1 < _CURSOR_TURN_MAX_ATTEMPTS
+                and turn.error
+                and not turn.interrupted
+            ):
+                logger.warning(
+                    "cursor SDK turn failed, retrying with fresh session: %s",
+                    turn.error,
+                )
+                _ensure_cursor_sdk_session(
+                    agent,
+                    progress_callback=progress_callback,
+                    tool_progress_callback=tool_progress_callback,
+                )
+                continue
+        break
+
+    if turn is None:
         return {
-            "final_response": (
-                f"Cursor SDK turn failed: {exc}. "
-                "Check CURSOR_API_KEY and pip install cursor-sdk."
-            ),
+            "final_response": "Cursor SDK turn failed (no result).",
             "messages": messages,
             "api_calls": 0,
             "completed": False,
             "partial": True,
-            "error": str(exc),
+            "error": "cursor_sdk_no_turn_result",
             "interrupted": bool(getattr(agent, "_interrupt_requested", False)),
         }
-
-    if getattr(turn, "should_retire", False):
-        logger.warning("cursor SDK session retired (error: %s)", turn.error)
-        try:
-            agent._cursor_session.close()
-        except Exception:
-            pass
-        agent._cursor_session = None
 
     if turn.projected_messages:
         messages.extend(turn.projected_messages)

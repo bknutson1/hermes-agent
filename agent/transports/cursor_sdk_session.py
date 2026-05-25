@@ -3,6 +3,16 @@
 Owns one ``cursor_sdk.Agent`` per Hermes session. Drives ``agent.send()``,
 consumes ``run.messages()``, projects events via :class:`CursorEventProjector`,
 and returns a turn result for :func:`agent.cursor_runtime.run_cursor_sdk_turn`.
+
+Repro (pre-fix CLI on ``cursor_sdk_runtime``):
+  1. ``hermes`` with provider ``cursor``; keep the same CLI session open.
+  2. Send turns over ~1 hour (or idle the session >1h, then send again).
+  3. First turn after the hour fails (bridge/agent connection stale); without
+     retirement+retry the session stays wedged until manual ``/resume``.
+
+Post-fix: ``should_proactively_retire()`` recycles the SDK session before the
+typical ~1h bridge TTL; terminal errors set ``should_retire``; ``cursor_runtime``
+retries once with a fresh session while Hermes ``state.db`` history is unchanged.
 """
 
 from __future__ import annotations
@@ -30,8 +40,20 @@ _DEFAULT_TURN_TIMEOUT = 600.0
 _STARTUP_TIMEOUT = 180.0
 _BRIDGE_LAUNCH_TIMEOUT = 45.0
 _POLL_INTERVAL_S = 0.2
+# Refresh before the common ~1h cursor-sdk-bridge / agent TTL (reporter window).
+_DEFAULT_SESSION_MAX_AGE_SECONDS = 3300.0
 _MIN_PYTHON = (3, 11)
 _MIN_PYTHON_DEFAULT_BRIDGE = (3, 12)
+
+
+def _cursor_session_max_age_seconds() -> float:
+    raw = os.environ.get("HERMES_CURSOR_SESSION_MAX_AGE_SECONDS", "").strip()
+    if raw:
+        try:
+            return max(60.0, float(raw))
+        except ValueError:
+            pass
+    return _DEFAULT_SESSION_MAX_AGE_SECONDS
 
 
 @dataclass
@@ -328,6 +350,8 @@ class CursorSDKSession:
         self._mcp_servers: Optional[dict[str, dict[str, Any]]] = None
         # Hermes prepends the system prompt on turn 0 only (see cursor_runtime).
         self._turns_sent = 0
+        self._agent_started_at: Optional[float] = None
+        self._max_session_age_seconds = _cursor_session_max_age_seconds()
 
     def _resolve_mcp_servers(self) -> dict[str, dict[str, Any]]:
         if self._mcp_servers is None:
@@ -588,9 +612,23 @@ class CursorSDKSession:
             client=client,
         )
         self._agent = self._agent_cm.__enter__()
+        self._agent_started_at = time.monotonic()
         agent_id = str(getattr(self._agent, "agent_id", "") or "")
         logger.info("cursor SDK agent started: id=%s cwd=%s", agent_id[:12], self._cwd)
         return agent_id
+
+    def session_age_seconds(self) -> float:
+        """Wall time since ``Agent.create`` succeeded (0 if not started)."""
+        started = self._agent_started_at
+        if started is None:
+            return 0.0
+        return max(0.0, time.monotonic() - started)
+
+    def should_proactively_retire(self) -> bool:
+        """True when the SDK agent has lived past the configured max age."""
+        if self._agent is None or self._agent_started_at is None:
+            return False
+        return self.session_age_seconds() >= self._max_session_age_seconds
 
     def ensure_started(self) -> str:
         if self._agent is not None:
@@ -616,6 +654,7 @@ class CursorSDKSession:
         if self._closed:
             return
         self._closed = True
+        self._agent_started_at = None
         if self._active_run is not None:
             try:
                 if self._active_run.supports("cancel"):
@@ -757,10 +796,11 @@ class CursorSDKSession:
             else:
                 terminal = run.wait()
                 status = str(getattr(terminal, "status", "") or "").strip().lower()
-                if status == "error":
+                if status in {"error", "expired"}:
                     result.error = str(
                         getattr(terminal, "result", "") or "Cursor run failed"
                     )
+                    result.should_retire = True
                 elif status == "cancelled":
                     result.interrupted = True
                 terminal_final = str(getattr(terminal, "result", "") or "").strip()
