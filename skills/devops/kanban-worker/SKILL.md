@@ -1,7 +1,7 @@
 ---
 name: kanban-worker
 description: Pitfalls, examples, and edge cases for Hermes Kanban workers. The lifecycle itself is auto-injected into every worker's system prompt as KANBAN_GUIDANCE (from agent/prompt_builder.py); this skill is what you load when you want deeper detail on specific scenarios.
-version: 2.0.1
+version: 2.0.8
 platforms: [linux, macos, windows]
 metadata:
   hermes:
@@ -49,7 +49,7 @@ kanban_complete(
 
 **Coding task on worktree/dir (default SDLC handoff):**
 
-Call `kanban_complete` with full handoff in `summary` + `metadata`. The kernel routes the card to the **Review** column. Load `sdlc-review` for the automated pass; humans merge after `review-required:` block.
+Call `kanban_complete` with full handoff in `summary` + `metadata`. The kernel routes the card to the **Review** column for a **full code review** loop — the review agent returns the card to `ready` via `kanban_request_changes` until clean, then `review-required:` block for human merge.
 
 ```python
 kanban_complete(
@@ -63,7 +63,9 @@ kanban_complete(
 )
 ```
 
-Scratch tasks complete to `done` normally. Review agents (`HERMES_KANBAN_REVIEW=1`): see `sdlc-review` — use `kanban_block(review-required:...)` or `kanban_request_changes`, never `kanban_complete`.
+Scratch tasks complete to `done` normally. Review agents (`HERMES_KANBAN_REVIEW=1`): see `sdlc-review` — full code review; `kanban_request_changes` on Critical/Warning until Approved, then `kanban_block(review-required:...)`. Never `kanban_complete`.
+
+**After `kanban_request_changes`:** read the latest review comment, fix every Critical/Warning, re-run tests, then `kanban_complete` again to re-enter Review.
 
 **Research task:**
 ```python
@@ -127,6 +129,8 @@ Good heartbeats name progress: `"epoch 12/50, loss 0.31"`, `"scanned 1.2M/2.4M r
 
 Bad heartbeats: `"still working"`, empty notes, sub-second intervals. Every few minutes max; skip entirely for tasks under ~2 minutes.
 
+**Long runs (>1 hour):** call `kanban_heartbeat` **at least once per hour** even if progress is slow. The dispatcher reclaims tasks when no heartbeat arrived in the last hour (`kanban.dispatch_stale_timeout_seconds`, default 4h). Reclaim re-queues as `ready` without failure penalty, but you lose in-run progress.
+
 ## Retry scenarios
 
 If you open the task and `kanban_show` returns `runs: [...]` with one or more closed runs, you're a retry. The prior runs' `outcome` / `summary` / `error` tell you what didn't work. Don't repeat that path. Typical retry diagnostics:
@@ -159,6 +163,8 @@ You can configure the gateway to receive cross-profile Kanban task notifications
 
 **Don't rely on the CLI when the guidance is available.** The `kanban_*` tools work across all terminal backends (Docker, Modal, SSH). `hermes kanban <verb>` from your terminal tool will fail in containerized backends because the CLI isn't installed there. When in doubt, use the tool.
 
+**Dashboard Specify with LM Studio thinking models.** Kanban Specify, decompose, or other short JSON-only aux calls can fail with "empty response" when the configured local provider is a Qwen **thinking** model (LM Studio OpenAI-compatible API). The HTTP 200 body may have tokens in `message.reasoning_content` with empty `message.content` and `finish_reason: length` — not a broken server. **Workers:** if Specify/decompose fails mysteriously on triage promotion, tell the user to check aux-model config or patch the fork to pass top-level `reasoning_effort: "none"` on those calls. Maintainer detail: `hermes-fork-workflows` → `references/lm-studio-kanban-aux-json.md`; upstream: bundled `hermes-agent` → `references/kanban-triage-lmstudio-thinking.md`. Do **not** treat this as "LM Studio is broken."
+
 ## CLI fallback (for scripting)
 
 Every tool has a CLI equivalent for human operators and scripts:
@@ -170,6 +176,18 @@ Every tool has a CLI equivalent for human operators and scripts:
 
 Use the tools from inside an agent; the CLI exists for the human at the terminal.
 
+## RoguelikeTD board: triage is a manual parking lot
+
+Board slug `roguelike-td`: **triage** cards are rough captures — leave them **unassigned** until the user explicitly promotes them.
+
+- Do **not** run `kanban specify`, `kanban decompose`, or assign a worker profile to triage cards unless the user asks.
+- Gateway: keep `kanban.auto_decompose` off when triage is a parking lot (otherwise triage cards auto-spawn children).
+- Creating triage from Ideas backlog markdown: `references/rogueliketd-triage-from-ideas-backlog.md`.
+- Proposed tower archetype batches: `references/rogueliketd-tower-archetype-triage.md`.
+- Orchestrator fan-out after promotion: `kanban-orchestrator` → RoguelikeTD patterns.
+
 ## Reference
 
 - `references/kanban-review-column.md` — Review column vs Blocked `review-required` vs separate reviewer task; SDLC flow and config knobs
+- `references/rogueliketd-triage-from-ideas-backlog.md` — triage card from Ideas checklist markdown (not `ideas_create`)
+- `references/rogueliketd-tower-archetype-triage.md` — triage bodies for proposed tower archetypes

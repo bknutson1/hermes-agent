@@ -463,10 +463,12 @@ def _handle_complete(args: dict, **kw) -> str:
         )
     if os.environ.get("HERMES_KANBAN_REVIEW") == "1":
         return tool_error(
-            "Review agents cannot kanban_complete to done. Post findings via "
-            "kanban_comment, then kanban_block(reason='review-required: ...') "
-            "for human sign-off or kanban_request_changes(...) to send the "
-            "card back to ready for the implementer."
+            "Review agents cannot kanban_complete to done. Run a full code "
+            "review (sdlc-review skill). Post a Code Review Summary via "
+            "kanban_comment first. On Critical/Warning findings call "
+            "kanban_request_changes(...) to loop the card to ready for the "
+            "implementer; only after Approved (zero Critical/Warning) call "
+            "kanban_block(reason='review-required: ...') for human merge."
         )
     if metadata is not None and not isinstance(metadata, dict):
         return tool_error(
@@ -521,8 +523,9 @@ def _handle_complete(args: dict, **kw) -> str:
                     submitted_for_review=True,
                     message=(
                         "Implementation handoff submitted to the Review column. "
-                        "An automated review agent will verify the work; humans "
-                        "approve after review-required block."
+                        "A review agent will run full code review and may "
+                        "return the card to ready via kanban_request_changes "
+                        "until approved; humans merge after review-required block."
                     ),
                 )
             return _ok(task_id=tid, run_id=run.id if run else None)
@@ -947,10 +950,11 @@ KANBAN_COMPLETE_SCHEMA = {
         "tests_run, decisions, findings, etc). At least one of "
         "``summary`` or ``result`` is required. On ``worktree`` / ``dir`` "
         "tasks the kernel redirects this call to the Review column "
-        "(``status = review``) for an automated SDLC review pass — pass "
-        "the full handoff here (changed files, tests, PR URL in "
-        "``metadata``). After review, humans approve via "
-        "``review-required:`` block. For genuinely "
+        "(``status = review``) for full code review — pass the full "
+        "handoff here (changed files, exact test commands, PR URL in "
+        "``metadata``). Review may loop via ``kanban_request_changes`` "
+        "until approved, then ``review-required:`` block for human merge. "
+        "For genuinely "
         "terminal scratch tasks (research writeups, pure decomposition), "
         "``kanban_complete`` completes normally. If you created new "
         "tasks via ``kanban_create`` during this run, list their ids "
@@ -1070,11 +1074,14 @@ KANBAN_BLOCK_SCHEMA = {
 KANBAN_REQUEST_CHANGES_SCHEMA = {
     "name": "kanban_request_changes",
     "description": (
-        "Return the current task to ``ready`` after an automated review run "
-        "when changes are needed. Post a structured comment with the fix "
-        "list first, then call this with a short reason. Review agents use "
-        "this instead of implementing fixes themselves. Do not use from "
-        "implementer runs — use ``kanban_complete`` to submit to Review."
+        "Return the current task to ``ready`` after a review run when the "
+        "code review has Critical or Warning findings. Post the full Code "
+        "Review Summary via ``kanban_comment`` first, then call this with a "
+        "short reason (e.g. ``code review: 2 critical, 1 warning``). "
+        "Implementer fixes and ``kanban_complete`` again to re-enter Review. "
+        "Review agents use this instead of patching code themselves. "
+        "Do not use from implementer runs — use ``kanban_complete`` to "
+        "submit to Review."
     ),
     "parameters": {
         "type": "object",

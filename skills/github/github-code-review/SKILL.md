@@ -479,3 +479,19 @@ git branch -D pr-$PR_NUMBER
 - **Approve** — no critical or warning-level issues, only minor suggestions or all clear
 - **Request Changes** — any critical or warning-level issue that should be fixed before merge
 - **Comment** — observations and suggestions, but nothing blocking (use when you're unsure or the PR is a draft)
+
+---
+
+## 6. Kanban SDLC review (`HERMES_KANBAN_REVIEW=1`)
+
+When spawned as the Kanban **review** agent (not a casual PR review), load `sdlc-review` and use **this skill’s Section 3 checklist** plus `references/review-output-template.md` for the `kanban_comment` body.
+
+| GitHub PR review | Kanban SDLC review |
+|------------------|-------------------|
+| `gh pr review --request-changes` | `kanban_request_changes` → card returns to `ready` |
+| `gh pr review --approve` | `kanban_block(review-required:…)` only after **Verdict: Approved** (0 Critical, 0 Warning) |
+| PR comment / inline comments | `kanban_comment` (required before any status transition) |
+
+**Loop:** implementer `kanban_complete` → review → you → Critical/Warning → `kanban_request_changes` → implementer fixes → re-submit → repeat until Approved → `review-required` block for human merge. Verdict rules: `sdlc-review` → `references/review-loop-and-verdict.md`.
+
+Do not `kanban_block(review-required:…)` while Critical or Warning items remain. GitHub `gh pr review` is optional; the Kanban comment is authoritative for the fix loop.

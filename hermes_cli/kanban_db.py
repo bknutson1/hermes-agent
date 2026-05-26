@@ -5324,8 +5324,8 @@ def dispatch_once(
     # ---- review column dispatch ----
     # Review tasks are tasks that a worker moved to 'review' after
     # creating a PR.  The dispatcher spawns a review agent (loading
-    # sdlc-review skill) that verifies the PR and either blocks with
-    # review-required (human sign-off) or returns the card to ready.
+    # sdlc-review skill) that runs full code review: request_changes
+    # loop until Approved, then review-required block for human merge.
     #
     # Same concurrency model as ready dispatch: review spawns count
     # against max_spawn alongside ready tasks, so the total number of

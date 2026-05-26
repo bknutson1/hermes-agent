@@ -6,8 +6,8 @@ Use when the user asks how **Review** works, or when choosing between Review, Bl
 
 | Lane | Status / pattern | Who acts | Typical use |
 |------|------------------|----------|-------------|
-| **Review column** | `status = review` | Dispatcher spawns **sdlc-review** on the **same** card | Automated SDLC/PR verification after implementer `kanban_complete` |
-| **Blocked + `review-required:`** | `status = blocked`, reason prefix | **Human** after automated review approves AC | Review agent calls `kanban_block(review-required: …)`; human merges/unblocks |
+| **Review column** | `status = review` | Dispatcher spawns **sdlc-review** on the **same** card | Full code review after implementer `kanban_complete` |
+| **Blocked + `review-required:`** | `status = blocked`, reason prefix | **Human** after automated review **Approved** (zero Critical/Warning) | Review agent calls `kanban_block(review-required: …)` only after passing full review; human merges/unblocks |
 | **Ready + reviewer assignee** | `status = ready`, assignee = reviewer profile | Normal worker on that profile | Orchestrator pattern: **separate review task**, not the Review column |
 
 Do not conflate these when explaining the board or planning work.
@@ -21,8 +21,9 @@ running (implementer)
   → kanban_complete(summary, metadata)
   → review          # kernel redirect; run outcome submitted_for_review
   → running         # dispatcher + sdlc-review (HERMES_KANBAN_REVIEW=1)
+  → ready           # kanban_request_changes — implementer fixes (loop)
+  → review → …      # repeat until code review Approved
   → blocked         # kanban_block(review-required: …) → human merge/sign-off
-     or ready       # kanban_request_changes(reason) → implementer fixes
 ```
 
 **Entering `review`:** implementer calls `kanban_complete` with structured handoff (`metadata.pr`, `changed_files`, test counts). Kernel sets `status = review` and ends the run as `submitted_for_review`. No separate `kanban_submit_for_review` tool.
@@ -31,8 +32,8 @@ running (implementer)
 
 | Outcome | Tool | Next status |
 |---------|------|-------------|
-| AC met, human should merge | `kanban_block(reason="review-required: …")` | `blocked` |
-| Fixes needed | `kanban_comment` + `kanban_request_changes(reason=…)` | `ready` (same assignee) |
+| Code review Approved (0 Critical, 0 Warning) | `kanban_block(reason="review-required: …")` | `blocked` |
+| Critical or Warning findings | `kanban_comment` + `kanban_request_changes(reason=…)` | `ready` (same assignee; loop) |
 
 Review agents **cannot** `kanban_complete` to `done` — the tool rejects when `HERMES_KANBAN_REVIEW=1`.
 
