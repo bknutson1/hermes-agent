@@ -17,21 +17,54 @@ import {
   setPluginLoadError,
 } from "./registry";
 
-export function usePlugins() {
-  const [manifests, setManifests] = useState<PluginManifest[]>([]);
-  const [plugins, setPlugins] = useState<RegisteredPlugin[]>([]);
-  const [loading, setLoading] = useState(true);
-  const loadedScripts = useRef<Set<string>>(new Set());
+/** Survive React remounts / brief reload cycles without clearing the sidebar. */
+let manifestsCache: PluginManifest[] | null = null;
+let manifestsPromise: Promise<PluginManifest[]> | null = null;
+const loadedScriptBases = new Set<string>();
 
-  // Fetch manifests on mount.
-  useEffect(() => {
-    api
+function fetchManifestsOnce(): Promise<PluginManifest[]> {
+  if (manifestsCache) {
+    return Promise.resolve(manifestsCache);
+  }
+  if (!manifestsPromise) {
+    manifestsPromise = api
       .getPlugins()
       .then((list) => {
+        manifestsCache = list;
+        return list;
+      })
+      .catch((err) => {
+        manifestsPromise = null;
+        throw err;
+      });
+  }
+  return manifestsPromise;
+}
+
+export function usePlugins() {
+  const [manifests, setManifests] = useState<PluginManifest[]>(
+    () => manifestsCache ?? [],
+  );
+  const [plugins, setPlugins] = useState<RegisteredPlugin[]>([]);
+  const [loading, setLoading] = useState(() => manifestsCache === null);
+  const mountedRef = useRef(true);
+
+  // Fetch manifests on mount (deduped across remounts).
+  useEffect(() => {
+    mountedRef.current = true;
+    void fetchManifestsOnce()
+      .then((list) => {
+        if (!mountedRef.current) return;
         setManifests(list);
         if (list.length === 0) setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => {
+        if (!mountedRef.current) return;
+        setLoading(false);
+      });
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   // Load plugin assets when manifests arrive.
@@ -67,20 +100,14 @@ export function usePlugins() {
         ? `${baseUrl}?v=${assetVersion}&hermes_dv=${Date.now()}`
         : `${baseUrl}?v=${assetVersion}`;
       if (!import.meta.env.DEV) {
-        if (loadedScripts.current.has(baseUrl)) continue;
-        loadedScripts.current.add(baseUrl);
+        if (loadedScriptBases.has(baseUrl)) continue;
+        loadedScriptBases.add(baseUrl);
       }
 
       const script = document.createElement("script");
       script.setAttribute("data-hermes-plugin", manifest.name);
       script.src = scriptSrc;
       script.async = true;
-      // SRI integrity verification — defense against compromised plugin
-      // delivery. Plugin manifests can declare an integrity hash
-      // (e.g. "sha384-...") which the browser verifies before executing.
-      // Without this, a man-in-the-middle or compromised plugin server
-      // can substitute the JS bundle silently. Opt-in: when no integrity
-      // is declared in the manifest, behavior is unchanged.
       if (manifest.integrity && typeof manifest.integrity === "string") {
         script.integrity = manifest.integrity;
         script.crossOrigin = "anonymous";
@@ -102,7 +129,6 @@ export function usePlugins() {
       injectedScripts.push(script);
     }
 
-    // Give plugins a moment to load and register, then stop loading state.
     const timeout = setTimeout(() => setLoading(false), 2000);
     return () => {
       clearTimeout(timeout);
@@ -125,7 +151,6 @@ export function usePlugins() {
         }
       }
       setPlugins(resolved);
-      // If all plugins registered, stop loading early.
       if (resolved.length === manifests.length && manifests.length > 0) {
         setLoading(false);
       }

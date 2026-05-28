@@ -4433,15 +4433,27 @@ def _discover_dashboard_plugins() -> list:
 
 # Cache discovered plugins per-process (refresh on explicit re-scan).
 _dashboard_plugins_cache: Optional[list] = None
+_dashboard_plugins_rescan_at: float = 0.0
 
 
 def _get_dashboard_plugins(force_rescan: bool = False) -> list:
-    global _dashboard_plugins_cache
+    """Return cached dashboard plugin manifests, rescanning on demand.
+
+    Automatic rescan when a cached ``_dir`` vanishes is rate-limited so a
+  flaky filesystem stat (or a plugin dir briefly absent during install)
+  cannot trigger rediscovery on every ``/dashboard-plugins/*`` asset hit.
+    """
+    global _dashboard_plugins_cache, _dashboard_plugins_rescan_at
     if _dashboard_plugins_cache is None or force_rescan:
         _dashboard_plugins_cache = _discover_dashboard_plugins()
+        _dashboard_plugins_rescan_at = time.monotonic()
     elif _dashboard_plugins_cache:
-        if any(not Path(p["_dir"]).is_dir() for p in _dashboard_plugins_cache):
+        missing_dir = any(
+            not Path(p["_dir"]).is_dir() for p in _dashboard_plugins_cache
+        )
+        if missing_dir and (time.monotonic() - _dashboard_plugins_rescan_at) >= 5.0:
             _dashboard_plugins_cache = _discover_dashboard_plugins()
+            _dashboard_plugins_rescan_at = time.monotonic()
     return _dashboard_plugins_cache
 
 

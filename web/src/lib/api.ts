@@ -41,7 +41,35 @@ function setSessionHeader(headers: Headers, token: string): void {
   }
 }
 
-export async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
+const SESSION_TOKEN_RE =
+  /window\.__HERMES_SESSION_TOKEN__\s*=\s*"([^"]+)"/;
+
+/** Re-read the ephemeral token from a fresh ``index.html`` (loopback mode).
+ *  Avoids a full page reload when the dashboard restarts and the tab still
+ *  holds the previous ``window.__HERMES_SESSION_TOKEN__``. */
+async function refreshSessionTokenFromHtml(): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/`, {
+      credentials: "include",
+      headers: { Accept: "text/html" },
+    });
+    if (!res.ok) return false;
+    const html = await res.text();
+    const match = html.match(SESSION_TOKEN_RE);
+    if (!match?.[1]) return false;
+    window.__HERMES_SESSION_TOKEN__ = match[1];
+    _sessionToken = match[1];
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function fetchJSONOnce<T>(
+  url: string,
+  init: RequestInit | undefined,
+  allowTokenRetry: boolean,
+): Promise<T> {
   // Inject the session token into all /api/ requests.
   const headers = new Headers(init?.headers);
   const token = window.__HERMES_SESSION_TOKEN__;
@@ -91,26 +119,25 @@ export async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> 
       // Never resolve — the page is about to unload.
       return new Promise<T>(() => {});
     }
-    // Loopback mode: ``_SESSION_TOKEN`` rotates on every server restart
-    // (``hermes update``, ``hermes gateway restart``, etc.). A tab kept
-    // open across the restart holds the OLD token in
-    // ``window.__HERMES_SESSION_TOKEN__`` from the previous HTML render,
-    // so every fetch returns 401. The HTML is served ``Cache-Control:
-    // no-store`` so a reload picks up the freshly-injected token. Trigger
-    // that reload once on the first stale-token 401 — gated mode is
-    // handled above, so reaching here in gated mode means a real
-    // middleware failure that should not reload-loop.
+    // Loopback mode: ``_SESSION_TOKEN`` rotates on every server restart.
+    // Prefer scraping a fresh token from index.html (no flash); fall back
+    // to a single full reload if that fails.
     if (!window.__HERMES_AUTH_REQUIRED__) {
-      let alreadyReloaded = false;
-      try {
-        alreadyReloaded =
-          sessionStorage.getItem("hermes.tokenReloadAttempted") === "1";
-      } catch {
-        /* SSR / privacy mode — fall through to throw */
+      if (allowTokenRetry && (await refreshSessionTokenFromHtml())) {
+        return fetchJSONOnce<T>(url, init, false);
       }
-      if (!alreadyReloaded) {
+      const RELOAD_COOLDOWN_MS = 30_000;
+      let lastReloadAt = 0;
+      try {
+        lastReloadAt = Number(
+          sessionStorage.getItem("hermes.tokenReloadAt") ?? "0",
+        );
+      } catch {
+        /* SSR / privacy mode — fall through */
+      }
+      if (Date.now() - lastReloadAt >= RELOAD_COOLDOWN_MS) {
         try {
-          sessionStorage.setItem("hermes.tokenReloadAttempted", "1");
+          sessionStorage.setItem("hermes.tokenReloadAt", String(Date.now()));
         } catch {
           /* SSR / privacy mode — best effort */
         }
@@ -119,21 +146,15 @@ export async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> 
       }
     }
   }
-  if (res.ok) {
-    // Clear the stale-token reload guard: a successful 2xx proves the
-    // current ``window.__HERMES_SESSION_TOKEN__`` is valid, so the next
-    // 401 — if any — should be allowed to trigger its own reload cycle.
-    try {
-      sessionStorage.removeItem("hermes.tokenReloadAttempted");
-    } catch {
-      /* SSR / privacy mode — ignore */
-    }
-  }
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`${res.status}: ${text}`);
   }
   return res.json();
+}
+
+export async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
+  return fetchJSONOnce<T>(url, init, true);
 }
 
 /** Encode a plugin registry key for URL paths (preserves `/` segment separators). */
