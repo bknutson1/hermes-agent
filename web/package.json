@@ -18,7 +18,7 @@
     "@lexical/react": "^0.44.0",
     "@lexical/rich-text": "^0.44.0",
     "@lexical/selection": "^0.44.0",
-    "@nous-research/ui": "0.16.0",
+    "@nous-research/ui": "0.18.2",
     "@observablehq/plot": "^0.6.17",
     "@react-three/fiber": "^9.6.0",
     "@tailwindcss/vite": "^4.2.1",

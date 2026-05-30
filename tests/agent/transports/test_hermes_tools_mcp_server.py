@@ -11,9 +11,6 @@ from __future__ import annotations
 import inspect
 import json
 from typing import Literal, get_args, get_origin
-from unittest.mock import patch
-
-import pytest
 
 
 class TestModuleSurface:
