@@ -4,7 +4,7 @@ description: >-
   Use when the user runs /remote-update — guide syncing their Hermes Agent fork
   with NousResearch/upstream via git fetch, pull, merge, conflict resolution,
   commit, and push (all in-terminal, no scripts).
-version: 1.1.1
+version: 1.2.0
 author: Hermes Agent
 license: MIT
 metadata:
@@ -113,9 +113,11 @@ For **each** conflicted file:
 3. **Resolve in your reasoning** using these rules (same intent as upstream Hermes fork merges):
 
    - Output the **complete resolved file** when writing — no `<<<<<<<` / `=======` / `>>>>>>>` markers.
+   - **Never** write meta/placeholder text as file content (e.g. “The resolved file is also saved at…”, “If this file is supposed to be used…”, or a one-line summary). That is not a valid resolution.
    - **Keep** intentional fork-only changes (Kanban, LM Studio aux config, dashboard/plugins, Windows-specific fixes) when not clearly superseded by upstream.
    - **Prefer upstream** for bug fixes and refactors that replace obsolete fork patches.
    - Remove every conflict marker.
+   - After writing, **read back** the file and confirm it looks like real source (imports, comments, functions) — not prose.
 
 4. **Write** the resolved content (write_file / patch) and stage:
 
@@ -145,6 +147,47 @@ cd "$REPO" && git commit -m "merge: sync fork with upstream/main" --no-edit
 
 (Use existing merge message if commit already created.)
 
+### Post-merge verification (required before push)
+
+Merge commits can look “clean” in git while still leaving a truncated or prose-filled file (e.g. `web/src/lib/api.ts` replaced by a single English sentence). **Do not push** until this passes.
+
+1. List files changed in the merge commit:
+
+   ```bash
+   cd "$REPO" && git diff --name-only HEAD^1 HEAD
+   ```
+
+2. For each path under `web/src/` (especially `web/src/lib/api.ts`):
+
+   - **Line count sanity** — if either parent had hundreds of lines and the merge result has only a handful, treat as corruption:
+
+     ```bash
+     cd "$REPO" && wc -l HEAD^1:"web/src/lib/api.ts" HEAD^2:"web/src/lib/api.ts" HEAD:"web/src/lib/api.ts" 2>/dev/null || \
+       git show HEAD^1:web/src/lib/api.ts | wc -l; \
+       git show HEAD^2:web/src/lib/api.ts | wc -l; \
+       git show HEAD:web/src/lib/api.ts | wc -l
+     ```
+
+   - **First-line sniff** — TypeScript/TSX must not start with English prose. Fail if line 1 matches meta placeholders or lacks typical source tokens (`//`, `import`, `export`, `declare`, `function`, `const`, `type`, `interface`, `<` for TSX).
+
+   - **Conflict markers** — none left in tree:
+
+     ```bash
+     cd "$REPO" && git grep -n '^<<<<<<< ' -- web/src || true
+     ```
+
+3. If `web/` changed, **build the dashboard** (catches TS syntax errors like the corrupted `api.ts`):
+
+   ```bash
+   cd "$REPO/web" && npm run build
+   ```
+
+4. **On failure** — fix before push (do not leave a bad merge on `origin/main`):
+
+   - Prefer upstream for the broken file: `git checkout upstream/main -- "<path>" && git add -- "<path>"`
+   - Amend the merge commit if it is still `HEAD` and not pushed: `git commit --amend --no-edit`
+   - If already pushed, make a follow-up fix commit (as with `fix(web): restore api.ts…`).
+
 Push fork:
 
 ```bash
@@ -163,6 +206,7 @@ Tell the user that `origin/main` now includes the upstream changes.
 | `couldn't find remote ref upstream` | User confused branch name with remote — verify `git remote -v` |
 | `pull --ff-only` fails | Local main diverged; explain; do not force without user consent |
 | Unresolved conflicts after your pass | List paths; user can fix manually or re-run `/remote-update finish` |
+| Post-merge build fails or file looks truncated/prose | Restore from `upstream/main`, amend or fix commit; do **not** push |
 | `push` rejected | Show stderr; may need pull/rebase — ask user |
 
 ## Do not
@@ -172,3 +216,4 @@ Tell the user that `origin/main` now includes the upstream changes.
 - Suggest `/update` or `hermes update` after success — fork sync and local install refresh are separate; the user only asked to update `origin/main`
 - Force-push without explicit user approval
 - Skip reporting what you did at each major step
+- Push without running [Post-merge verification](#post-merge-verification-required-before-push) when the merge touched `web/`
