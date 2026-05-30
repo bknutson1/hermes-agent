@@ -297,7 +297,7 @@ The registry of record is `hermes_cli/commands.py` — every consumer
 /restart             Restart gateway (gateway)
 /sethome             Set current chat as home channel (gateway)
 /update              Update Hermes to latest (gateway)
-/remote-update       Sync fork with upstream (fetch, merge, LLM conflicts, push)
+/remote-update       Skill: sync fork with upstream (fetch, merge, LLM conflicts, push)
 /topic [sub]         Enable or inspect Telegram DM topic sessions (gateway)
 /platforms (/gateway) Show platform connection status (gateway)
 ```

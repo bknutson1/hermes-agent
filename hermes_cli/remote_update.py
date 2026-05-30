@@ -282,7 +282,7 @@ def finish_remote_update(
         return RemoteUpdateReport(RemoteUpdateStatus.FAILED, lines)
 
     if not _merge_in_progress(git, cwd):
-        say("✗ No merge in progress. Run `hermes remote-update` first.")
+        say("✗ No merge in progress. Run `/remote-update` first.")
         return RemoteUpdateReport(RemoteUpdateStatus.FAILED, lines)
 
     remaining = _unmerged_files(git, cwd)

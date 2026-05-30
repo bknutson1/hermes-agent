@@ -1,7 +1,7 @@
 ---
 name: hermes-agent-skill-authoring
 description: "Author in-repo SKILL.md: frontmatter, validator, structure."
-version: 1.0.0
+version: 1.0.3
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -124,6 +124,29 @@ Pick the closest existing category. Don't invent new top-level categories casual
    ```
 5. **Git add + commit** on the active branch.
 6. **Note:** the CURRENT session's skill loader is cached — `skill_view` / `skills_list` will not see the new skill until a new session. This is expected, not a bug.
+
+## TUI slash commands via skills (not COMMAND_REGISTRY)
+
+Some workflows belong as **skills invoked by `/skill-name`**, not as synchronous built-in commands in `hermes_cli/commands.py`.
+
+**When to use:** long-running git/sync work, the agent must run a script via terminal, or the user wants the workflow editable without a new Hermes release.
+
+**Mechanism:** `agent/skill_commands.py` registers `/name` for each loaded skill whose frontmatter `name` matches (hyphens allowed). No `CommandDef` or `cli.py` / `gateway/run.py` handler is required.
+
+**Migration checklist (built-in → skill):**
+
+1. Remove `CommandDef(...)` from `hermes_cli/commands.py` and dedicated-handler allowlists.
+2. Remove `elif canonical == "…"` handlers from `cli.py` and `gateway/run.py`.
+3. Remove `hermes <name>` subparser from `hermes_cli/main.py` if present.
+4. Add `skills/<category>/<name>/SKILL.md` with `name: <name>` matching the slash.
+5. Add `scripts/run_<name>.py` calling the existing `hermes_cli` module (do not duplicate logic in the skill).
+6. SKILL.md must include **On invocation — do this immediately**: run the script via terminal; no confirmation or plan first.
+7. Ship in repo, `sync_skills` to profile `skills/`, user runs `/reload-skills` if TUI was already open.
+8. Update sibling skills / `references/` — remove docs for deleted CLI subcommands.
+
+**UX:** built-ins run synchronously in the TUI worker; skill slash commands delegate to the agent (terminal tool). State that in the skill.
+
+Peer example: `skills/devops/remote-update/` (`/remote-update`, `/remote-update finish`).
 
 ## Cross-Referencing Other Skills
 

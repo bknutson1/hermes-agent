@@ -8892,32 +8892,6 @@ def cmd_update(args):
         _finalize_update_output(_update_io_state)
 
 
-def cmd_remote_update(args):
-    """Merge upstream/main into the fork's origin/main and push."""
-    from hermes_cli.remote_update import (
-        RemoteUpdateStatus,
-        default_hermes_repo_dir,
-        run_remote_update,
-    )
-
-    repo = Path(args.repo).expanduser() if getattr(args, "repo", None) else default_hermes_repo_dir()
-    branch = getattr(args, "branch", None) or "main"
-    resolution = getattr(args, "conflict_resolution", "llm")
-    if getattr(args, "prefer_upstream", False):
-        resolution = "upstream"
-    report = run_remote_update(
-        repo,
-        branch=branch,
-        finish=getattr(args, "finish", False),
-        conflict_resolution=resolution,
-    )
-    print(report.text)
-    if report.status == RemoteUpdateStatus.CONFLICTS:
-        sys.exit(2)
-    if not report.ok:
-        sys.exit(1)
-
-
 def _cmd_update_pip(args):
     """Update Hermes via pip (for PyPI installs)."""
     from hermes_cli import __version__
@@ -10185,7 +10159,6 @@ def _coalesce_session_name_args(argv: list) -> list:
         "insights",
         "version",
         "update",
-        "remote-update",
         "uninstall",
         "profile",
         "dashboard",
@@ -11048,7 +11021,7 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "ideas", "kanban", "login", "logout", "logs", "lsp", "mcp", "memory", "migrate",
         "model", "pairing", "plugins", "portal", "postinstall", "profile", "proxy",
         "send", "sessions", "setup",
-        "skills", "slack", "status", "tools", "uninstall", "update", "remote-update",
+        "skills", "slack", "status", "tools", "uninstall", "update",
         "version", "webhook", "whatsapp", "chat", "secrets", "security",
         # Help-ish invocations — plugin commands not being listed in
         # top-level --help is an acceptable trade-off for skipping an
@@ -13808,54 +13781,6 @@ Examples:
         help="Windows: proceed with the update even when another hermes.exe is detected. The concurrent process will likely cause WinError 32 warnings and may leave a reboot-deferred .exe replacement.",
     )
     update_parser.set_defaults(func=cmd_update)
-
-    # =========================================================================
-    # remote-update command
-    # =========================================================================
-    remote_update_parser = subparsers.add_parser(
-        "remote-update",
-        help="Merge upstream/main into your fork's origin/main and push",
-        description=(
-            "Fetch upstream and origin, merge upstream/main into local main "
-            "when upstream is ahead, auto-resolve conflicts with the auxiliary "
-            "LLM (keeps intentional fork changes), commit, and push to origin/main."
-        ),
-    )
-    remote_update_parser.add_argument(
-        "--branch",
-        default="main",
-        metavar="NAME",
-        help="Branch to sync (default: main)",
-    )
-    remote_update_parser.add_argument(
-        "--repo",
-        default=None,
-        metavar="PATH",
-        help="Git repository to update (default: Hermes Agent install directory)",
-    )
-    remote_update_parser.add_argument(
-        "--finish",
-        action="store_true",
-        default=False,
-        help="Resume an in-progress merge (resolve, commit, push)",
-    )
-    remote_update_parser.add_argument(
-        "--conflict-resolution",
-        choices=("llm", "upstream", "none"),
-        default="llm",
-        dest="conflict_resolution",
-        help=(
-            "How to handle merge conflicts (default: llm = auxiliary model merges "
-            "intelligently; upstream = blind theirs; none = stop)"
-        ),
-    )
-    remote_update_parser.add_argument(
-        "--prefer-upstream",
-        action="store_true",
-        default=False,
-        help="Alias for --conflict-resolution=upstream",
-    )
-    remote_update_parser.set_defaults(func=cmd_remote_update)
 
     # =========================================================================
     # uninstall command

@@ -1,14 +1,14 @@
 ---
 name: debugging-hermes-tui-commands
 description: "Debug Hermes TUI slash commands: Python, gateway, Ink UI."
-version: 1.0.0
+version: 1.0.1
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
   hermes:
     tags: [debugging, hermes-agent, tui, slash-commands, typescript, python]
-    related_skills: [python-debugpy, node-inspect-debugger, systematic-debugging]
+    related_skills: [python-debugpy, node-inspect-debugger, systematic-debugging, remote-update, hermes-agent-skill-authoring]
 ---
 
 # Debugging Hermes TUI Slash Commands
@@ -30,14 +30,25 @@ Use this skill when you encounter issues with slash commands in the Hermes TUI, 
 ## Architecture Overview
 
 ```
-Python backend (hermes_cli/commands.py)     <- canonical COMMAND_REGISTRY
+Python backend (hermes_cli/commands.py)     <- canonical COMMAND_REGISTRY (built-ins)
        │
        ▼
 TUI gateway (tui_gateway/server.py)         <- slash.exec / command.dispatch
        │
        ▼
 TUI frontend (ui-tui/src/app/slash/)        <- local handlers + fallthrough
+
+agent/skill_commands.py                     <- /skill-name for loaded skills (parallel path)
 ```
+
+**Two slash paths:**
+
+| Path | Examples | Registry | Handler |
+|------|----------|----------|---------|
+| Built-in | `/update`, `/reload-skills` | `COMMAND_REGISTRY` | `cli.py` / `gateway/run.py` |
+| Skill-backed | `/remote-update` | Skill `name:` in SKILL.md | Agent runs skill script (terminal) |
+
+Do **not** add a `CommandDef` for skill-only commands — that duplicates autocomplete and implies a synchronous handler. After removing a built-in, grep for leftover `canonical == "…"` handlers.
 
 Command definitions must be registered consistently across Python and TypeScript to work properly. The Python `COMMAND_REGISTRY` is the source of truth for: CLI dispatch, gateway help, Telegram BotCommand menu, Slack subcommand map, and autocomplete data shipped to Ink.
 

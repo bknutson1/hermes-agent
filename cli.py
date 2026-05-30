@@ -8626,8 +8626,6 @@ class HermesCLI:
         elif canonical == "update":
             if self._handle_update_command():
                 return False
-        elif canonical == "remote-update":
-            self._handle_remote_update_command(cmd_original)
         elif canonical == "paste":
             self._handle_paste_command()
         elif canonical == "image":
@@ -10093,19 +10091,6 @@ class HermesCLI:
         # sys.exit inside a non-main thread does not exit the process).
         self._pending_relaunch = ["update"]
         return True
-
-    def _handle_remote_update_command(self, cmd_original: str) -> None:
-        """Handle /remote-update — sync fork origin/main with upstream/main."""
-        from hermes_cli.remote_update import default_hermes_repo_dir, run_remote_update
-
-        parts = cmd_original.split(None, 1)
-        finish = len(parts) > 1 and parts[1].strip().lower() == "finish"
-        label = (
-            "Finishing remote-update…" if finish else "Syncing fork with upstream (full)…"
-        )
-        with self._busy_command(label):
-            report = run_remote_update(default_hermes_repo_dir(), finish=finish)
-        print(report.text)
 
     def _show_usage(self):
         """Show rate limits (if available) and session token usage."""
