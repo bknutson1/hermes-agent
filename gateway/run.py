@@ -7296,6 +7296,8 @@ class GatewayRunner:
                     return await self._handle_profile_command(event)
                 if _cmd_def_inner.name == "update":
                     return await self._handle_update_command(event)
+                if _cmd_def_inner.name == "remote-update":
+                    return await self._handle_remote_update_command(event)
 
             # Catch-all: any other recognized slash command reached the
             # running-agent guard. Reject gracefully rather than falling
@@ -7642,6 +7644,9 @@ class GatewayRunner:
 
         if canonical == "update":
             return await self._handle_update_command(event)
+
+        if canonical == "remote-update":
+            return await self._handle_remote_update_command(event)
 
         if canonical == "debug":
             return await self._handle_debug_command(event)
@@ -14178,6 +14183,26 @@ class GatewayRunner:
 
         self._schedule_update_notification_watch()
         return t("gateway.update.starting")
+
+    async def _handle_remote_update_command(self, event: MessageEvent) -> str:
+        """Handle /remote-update — merge upstream/main into origin/main and push."""
+        import asyncio
+        from hermes_cli.remote_update import default_hermes_repo_dir, run_remote_update
+
+        loop = asyncio.get_running_loop()
+        repo_dir = default_hermes_repo_dir()
+        raw_args = (event.get_command_args() or "").strip().lower()
+        finish = raw_args == "finish"
+
+        def _run() -> str:
+            report = run_remote_update(repo_dir, finish=finish)
+            return report.text
+
+        try:
+            return await loop.run_in_executor(None, _run)
+        except Exception as exc:
+            logger.exception("remote-update failed")
+            return f"✗ remote-update failed: {exc}"
 
     def _schedule_update_notification_watch(self) -> None:
         """Ensure a background task is watching for update completion."""
