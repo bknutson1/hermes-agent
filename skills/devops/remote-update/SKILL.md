@@ -4,7 +4,7 @@ description: >-
   Use when the user runs /remote-update — guide syncing their Hermes Agent fork
   with NousResearch/upstream via git fetch, pull, merge, conflict resolution,
   commit, and push (all in-terminal, no scripts).
-version: 1.1.0
+version: 1.1.1
 author: Hermes Agent
 license: MIT
 metadata:
@@ -167,7 +167,8 @@ Tell the user that `origin/main` now includes the upstream changes.
 
 ## Do not
 
-- Run Python scripts or `hermes_cli.remote_update`
+- Run Python scripts, `hermes remote-update`, or `hermes_cli.remote_update`
 - Use `git fetch origin upstream` (wrong — fetches a branch named `upstream` on origin)
+- Suggest `/update` or `hermes update` after success — fork sync and local install refresh are separate; the user only asked to update `origin/main`
 - Force-push without explicit user approval
 - Skip reporting what you did at each major step

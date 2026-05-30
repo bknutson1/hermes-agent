@@ -22,7 +22,7 @@ The **remote-update** skill instructs the agent to run git in the terminal and r
 ## Troubleshooting
 
 - **Repo path:** `hermes --version` → `Project:` (not the cwd where you invoked Hermes).
-- **`couldn't find remote ref upstream`:** missing `upstream` remote or wrong fetch syntax.
+- **`couldn't find remote ref upstream`:** usually `git fetch origin upstream` (asks origin for a branch named `upstream` on the fork). Fix: `git fetch origin` then `git fetch upstream` separately. Repo path is still `hermes --version` → `Project:`, not the shell cwd.
 - **Re-run while merge in progress:** `/remote-update finish` — do not re-fetch.
 
 ## Implementation note

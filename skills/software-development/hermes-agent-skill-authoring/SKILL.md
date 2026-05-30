@@ -129,7 +129,7 @@ Pick the closest existing category. Don't invent new top-level categories casual
 
 Some workflows belong as **skills invoked by `/skill-name`**, not as synchronous built-in commands in `hermes_cli/commands.py`.
 
-**When to use:** long-running git/sync work, the agent must run a script via terminal, or the user wants the workflow editable without a new Hermes release.
+**When to use:** git/sync workflows the user wants editable without a release, or when the agent should own steps (terminal + file edits) instead of a synchronous built-in handler.
 
 **Mechanism:** `agent/skill_commands.py` registers `/name` for each loaded skill whose frontmatter `name` matches (hyphens allowed). No `CommandDef` or `cli.py` / `gateway/run.py` handler is required.
 
@@ -139,14 +139,16 @@ Some workflows belong as **skills invoked by `/skill-name`**, not as synchronous
 2. Remove `elif canonical == "…"` handlers from `cli.py` and `gateway/run.py`.
 3. Remove `hermes <name>` subparser from `hermes_cli/main.py` if present.
 4. Add `skills/<category>/<name>/SKILL.md` with `name: <name>` matching the slash.
-5. Add `scripts/run_<name>.py` calling the existing `hermes_cli` module (do not duplicate logic in the skill).
-6. SKILL.md must include **On invocation — do this immediately**: run the script via terminal; no confirmation or plan first.
+5. Choose execution model:
+   - **Agent playbook (preferred for fork sync):** SKILL.md lists git steps; agent runs terminal + read/write; no bundled script, no background process.
+   - **Script wrapper:** optional `scripts/run_<name>.py` calling `hermes_cli` — only when the user wants a one-shot CLI, not for `/remote-update`-style TUI flows.
+6. SKILL.md must include **On invocation — do this immediately** (playbook steps or script); no confirmation or plan first.
 7. Ship in repo, `sync_skills` to profile `skills/`, user runs `/reload-skills` if TUI was already open.
 8. Update sibling skills / `references/` — remove docs for deleted CLI subcommands.
 
 **UX:** built-ins run synchronously in the TUI worker; skill slash commands delegate to the agent (terminal tool). State that in the skill.
 
-Peer example: `skills/devops/remote-update/` (`/remote-update`, `/remote-update finish`).
+Peer example: `skills/devops/remote-update/` — agent-driven git (`/remote-update`, `/remote-update finish`); see also `hermes-fork-workflows`.
 
 ## Cross-Referencing Other Skills
 
