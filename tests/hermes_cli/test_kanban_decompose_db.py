@@ -148,6 +148,130 @@ def test_decompose_rejects_cyclic_parents(kanban_home):
             )
 
 
+def test_decompose_children_inherit_scratch_workspace(kanban_home):
+    with kb.connect() as conn:
+        tid = _create_triage(conn)
+        kb.update_task_workspace(conn, tid, workspace_kind="scratch")
+        child_ids = kb.decompose_triage_task(
+            conn,
+            tid,
+            root_assignee="orch",
+            children=[{"title": "child a"}],
+            author="me",
+        )
+    assert child_ids is not None
+    with kb.connect() as conn:
+        child = kb.get_task(conn, child_ids[0])
+    assert child.workspace_kind == "scratch"
+    assert child.workspace_path is None
+
+
+def test_decompose_children_inherit_dir_workspace(kanban_home, tmp_path):
+    project = tmp_path / "my-app"
+    project.mkdir()
+    with kb.connect() as conn:
+        tid = _create_triage(conn)
+        kb.update_task_workspace(
+            conn,
+            tid,
+            workspace_kind="dir",
+            workspace_path=str(project),
+        )
+        child_ids = kb.decompose_triage_task(
+            conn,
+            tid,
+            root_assignee="orch",
+            children=[{"title": "child a"}, {"title": "child b"}],
+            author="me",
+        )
+    assert child_ids is not None
+    with kb.connect() as conn:
+        c0 = kb.get_task(conn, child_ids[0])
+        c1 = kb.get_task(conn, child_ids[1])
+    assert c0.workspace_kind == "dir"
+    assert c1.workspace_kind == "dir"
+    assert c0.workspace_path == str(project)
+    assert c1.workspace_path == str(project)
+
+
+def test_decompose_children_share_parent_worktree(kanban_home, tmp_path):
+    wt_path = tmp_path / "repo" / ".worktrees" / "feature-x"
+    wt_path.parent.mkdir(parents=True, exist_ok=True)
+    with kb.connect() as conn:
+        tid = _create_triage(conn)
+        kb.update_task_workspace(
+            conn,
+            tid,
+            workspace_kind="worktree",
+            workspace_path=str(wt_path),
+            branch_name="feature/my-epic",
+            base_branch="origin/develop",
+        )
+        child_ids = kb.decompose_triage_task(
+            conn,
+            tid,
+            root_assignee="orch",
+            children=[{"title": "lane a"}, {"title": "lane b"}],
+            author="me",
+        )
+    assert child_ids is not None
+    with kb.connect() as conn:
+        c0 = kb.get_task(conn, child_ids[0])
+        c1 = kb.get_task(conn, child_ids[1])
+    assert c0.workspace_kind == "worktree"
+    assert c1.workspace_kind == "worktree"
+    assert c0.workspace_path == str(wt_path)
+    assert c1.workspace_path == str(wt_path)
+    assert c0.branch_name == "feature/my-epic"
+    assert c1.branch_name == "feature/my-epic"
+    assert c0.base_branch == "origin/develop"
+    assert c1.base_branch == "origin/develop"
+
+
+def test_decompose_worktree_defaults_to_shared_parent_path_and_branch(kanban_home):
+    with kb.connect() as conn:
+        tid = _create_triage(conn)
+        kb.update_task_workspace(
+            conn,
+            tid,
+            workspace_kind="worktree",
+            base_branch="origin/develop",
+        )
+        child_ids = kb.decompose_triage_task(
+            conn,
+            tid,
+            root_assignee="orch",
+            children=[{"title": "lane a"}],
+            author="me",
+        )
+    assert child_ids is not None
+    with kb.connect() as conn:
+        child = kb.get_task(conn, child_ids[0])
+    assert child.workspace_kind == "worktree"
+    assert child.workspace_path is not None
+    assert tid in child.workspace_path
+    assert child.branch_name == f"wt/{tid}"
+    assert child.base_branch == "origin/develop"
+
+
+def test_decompose_rejects_dir_parent_without_path(kanban_home):
+    with kb.connect() as conn:
+        tid = _create_triage(conn)
+        conn.execute(
+            "UPDATE tasks SET workspace_kind = 'dir', workspace_path = NULL "
+            "WHERE id = ?",
+            (tid,),
+        )
+        with pytest.raises(ValueError, match="workspace_kind=dir"):
+            kb.decompose_triage_task(
+                conn,
+                tid,
+                root_assignee="orch",
+                children=[{"title": "child"}],
+                author="me",
+            )
+
+
 def test_decompose_records_audit_comment_and_event(kanban_home):
     with kb.connect() as conn:
         tid = _create_triage(conn)

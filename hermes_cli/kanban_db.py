@@ -4115,6 +4115,54 @@ def specify_triage_task(
     return True
 
 
+def _workspace_for_decomposed_children(
+    parent_row: sqlite3.Row,
+    *,
+    task_id: str,
+) -> tuple[str, Optional[str], Optional[str], Optional[str]]:
+    """Map a triage parent's workspace metadata onto decomposed child tasks.
+
+    - ``scratch``: each child gets its own scratch dir at claim time.
+    - ``dir``: children share the parent's absolute ``workspace_path``.
+    - ``worktree``: children share one git worktree for the epic — the
+      parent's ``workspace_path`` and ``branch_name`` when set, otherwise
+      a path under ``.worktrees/<parent_id>`` and branch ``wt/<parent_id>``
+      so every subtask works on the same feature branch checkout.
+    """
+    kind = parent_row["workspace_kind"] or "scratch"
+    if kind not in VALID_WORKSPACE_KINDS:
+        kind = "scratch"
+    parent_path = parent_row["workspace_path"]
+    keys = parent_row.keys()
+    parent_branch = parent_row["branch_name"] if "branch_name" in keys else None
+    parent_base = parent_row["base_branch"] if "base_branch" in keys else None
+
+    if kind == "scratch":
+        return ("scratch", None, None, None)
+    if kind == "dir":
+        path = str(parent_path).strip() if parent_path else ""
+        if not path:
+            raise ValueError(
+                f"cannot decompose task {task_id}: parent has workspace_kind=dir "
+                "but no workspace_path"
+            )
+        return ("dir", path, None, None)
+    if kind == "worktree":
+        from hermes_cli.kanban_worktree import default_worktree_path
+
+        path = str(parent_path).strip() if parent_path else ""
+        if not path:
+            path = str(default_worktree_path(task_id))
+        branch = str(parent_branch).strip() if parent_branch else f"wt/{task_id}"
+        return (
+            "worktree",
+            path,
+            branch,
+            _normalize_base_branch("worktree", parent_base),
+        )
+    return ("scratch", None, None, None)
+
+
 def decompose_triage_task(
     conn: sqlite3.Connection,
     task_id: str,
@@ -4139,6 +4187,12 @@ def decompose_triage_task(
             "assignee": "profile-name",        # optional, None -> default fallback
             "parents": [0, 2],                 # indices into this same children list
         }
+
+    Child ``workspace_kind`` / path / branch metadata is copied from the
+    triage parent: ``scratch`` children get isolated scratch dirs,
+    ``dir`` children share the parent's ``workspace_path``, and
+    ``worktree`` children share the parent's worktree path and branch
+    (one feature checkout for the whole decomposition).
 
     Returns the list of created child task ids (in input order) on
     success. Returns ``None`` when:
@@ -4208,13 +4262,18 @@ def decompose_triage_task(
     child_ids: list[str] = []
     with write_txn(conn):
         root_row = conn.execute(
-            "SELECT id, status, tenant FROM tasks WHERE id = ?", (task_id,)
+            "SELECT id, status, tenant, workspace_kind, workspace_path, "
+            "branch_name, base_branch FROM tasks WHERE id = ?",
+            (task_id,),
         ).fetchone()
         if root_row is None:
             return None
         if root_row["status"] != "triage":
             return None
         tenant = root_row["tenant"]
+        child_workspace = _workspace_for_decomposed_children(
+            root_row, task_id=task_id,
+        )
 
         # Create children. Status is 'todo' regardless of parents — we
         # link them under the root AFTER creation so the dispatcher
@@ -4225,16 +4284,22 @@ def decompose_triage_task(
             title = child["title"].strip()
             body = child.get("body")
             assignee = _canonical_assignee(child.get("assignee"))
+            ws_kind, ws_path, ws_branch, ws_base = child_workspace
             conn.execute(
                 "INSERT INTO tasks "
                 "(id, title, body, assignee, status, workspace_kind, "
+                " workspace_path, branch_name, base_branch, "
                 " tenant, created_at, created_by) "
-                "VALUES (?, ?, ?, ?, 'todo', 'scratch', ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?)",
                 (
                     new_id,
                     title,
                     body if isinstance(body, str) else None,
                     assignee,
+                    ws_kind,
+                    ws_path,
+                    ws_branch,
+                    ws_base,
                     tenant,
                     now,
                     (author or "decomposer"),

@@ -23,6 +23,8 @@ Your workspace kind determines how you should behave inside `$HERMES_KANBAN_WORK
 | `dir:<path>` | Shared persistent directory | Other runs will read what you write. Treat it like long-lived state. Path is guaranteed absolute (the kernel rejects relative paths). |
 | `worktree` | Git worktree at the resolved path | The dispatcher creates the worktree at spawn when missing (`git worktree add`). Commit work here. |
 
+**Decomposed children:** `kanban decompose` copies the triage parent's `workspace_kind` (`scratch` / `dir` / `worktree`). See `references/kanban-decompose-scratch-workspaces.md`.
+
 ## Tenant isolation
 
 If `$HERMES_TENANT` is set, the task belongs to a tenant namespace. When reading or writing persistent memory, prefix memory entries with the tenant so context doesn't leak across tenants:

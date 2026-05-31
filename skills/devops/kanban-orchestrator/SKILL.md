@@ -160,6 +160,8 @@ Tell them what you created in plain prose, naming the actual profiles you used:
 
 **Human-in-the-loop:** Any task can `kanban_block()` to wait for input. Dispatcher respawns after `/unblock`. The comment thread carries the full context.
 
+**Decompose inherits the parent's workspace:** `kanban decompose` copies the triage card's `workspace_kind` onto every child — `scratch` → isolated scratch dirs, `dir` → same `workspace_path`, `worktree` → same path + branch as the parent (one feature checkout for the whole graph; default path `.worktrees/<parent_id>`, default branch `wt/<parent_id>` when unset). Set workspace on the triage card before decomposing.
+
 ## Pitfalls
 
 **Inventing profile names that don't exist.** The dispatcher silently fails to spawn unknown assignees — the card just sits in `ready` forever. Always assign to a profile from your Step 0 discovery; ask the user if you're unsure.
@@ -177,6 +179,8 @@ Tell them what you created in plain prose, naming the actual profiles you used:
 **Don't pre-create the whole graph if the shape depends on intermediate findings.** If T3's structure depends on what T1 and T2 find, let T3 exist as a "synthesize findings" task whose own first step is to read parent handoffs and plan the rest. Orchestrators can spawn orchestrators.
 
 **Tenant inheritance.** If `HERMES_TENANT` is set in your env, pass `tenant=os.environ.get("HERMES_TENANT")` on every `kanban_create` call so child tasks stay in the same namespace.
+
+**Parallel children on one worktree.** Decomposed `worktree` children share a checkout; only run lanes in parallel when they won't stomp the same files, or link them so the dispatcher serializes work.
 
 ## Recovering stuck workers
 
