@@ -55,6 +55,7 @@ On each dispatch tick, after the Ready queue:
 |-----|--------|
 | `kanban.require_review_workspace_kinds` | Which workspace kinds redirect `kanban_complete` → `review` (default often `worktree`, `dir`) |
 | `kanban.allow_complete_without_review` | When true, worktree/dir complete goes straight to `done` |
+| `kanban.defer_human_review_to_decompose_root` | When true (default), decomposed **children** complete to `done` after SDLC Approved; human `review-required` only on epic root / standalone |
 | `metadata.review_waived` | Per-task bypass of redirect |
 
 `scratch` workspaces complete to `done` normally.

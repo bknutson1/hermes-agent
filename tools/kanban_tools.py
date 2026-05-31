@@ -545,15 +545,7 @@ def _handle_complete(args: dict, **kw) -> str:
         return tool_error(
             "provide at least one of: summary (preferred), result"
         )
-    if os.environ.get("HERMES_KANBAN_REVIEW") == "1":
-        return tool_error(
-            "Review agents cannot kanban_complete to done. Run a full code "
-            "review (sdlc-review skill). Post a Code Review Summary via "
-            "kanban_comment first. On Critical/Warning findings call "
-            "kanban_request_changes(...) to loop the card to ready for the "
-            "implementer; only after Approved (zero Critical/Warning) call "
-            "kanban_block(reason='review-required: ...') for human merge."
-        )
+    is_review_agent = os.environ.get("HERMES_KANBAN_REVIEW") == "1"
     if metadata is not None and not isinstance(metadata, dict):
         return tool_error(
             f"metadata must be an object/dict, got {type(metadata).__name__}"
@@ -563,6 +555,19 @@ def _handle_complete(args: dict, **kw) -> str:
     try:
         kb, conn = _connect(board=board)
         try:
+            allow_from_review = False
+            if is_review_agent:
+                if kb.task_requires_human_review_after_sdlc(conn, tid):
+                    return tool_error(
+                        "Review agents cannot kanban_complete to done on "
+                        "this card. Run a full code review (sdlc-review "
+                        "skill). Post a Code Review Summary via "
+                        "kanban_comment first. On Critical/Warning findings "
+                        "call kanban_request_changes(...); only after "
+                        "Approved call kanban_block(reason='review-required: "
+                        "...') for human merge."
+                    )
+                allow_from_review = True
             try:
                 ok = kb.complete_task(
                     conn, tid,
@@ -570,8 +575,10 @@ def _handle_complete(args: dict, **kw) -> str:
                     created_cards=created_cards,
                     expected_run_id=_worker_run_id(tid),
                     enforce_review=(
-                        os.environ.get("HERMES_KANBAN_TASK") == tid
+                        not is_review_agent
+                        and os.environ.get("HERMES_KANBAN_TASK") == tid
                     ),
+                    allow_from_review=allow_from_review,
                 )
             except kb.HallucinatedCardsError as hall_err:
                 # Structured rejection — surface the phantom ids so the
@@ -599,7 +606,19 @@ def _handle_complete(args: dict, **kw) -> str:
                 )
             run = kb.latest_run(conn, tid)
             task = kb.get_task(conn, tid)
+            if is_review_agent and task and task.status == "done":
+                return _ok(
+                    task_id=tid,
+                    run_id=run.id if run else None,
+                    status="done",
+                    review_approved=True,
+                    message=(
+                        "SDLC review approved; subtask marked done. Human "
+                        "sign-off is deferred to the decompose epic root."
+                    ),
+                )
             if task and task.status == "review":
+                defer = not kb.task_requires_human_review_after_sdlc(conn, tid)
                 return _ok(
                     task_id=tid,
                     run_id=run.id if run else None,
@@ -609,7 +628,13 @@ def _handle_complete(args: dict, **kw) -> str:
                         "Implementation handoff submitted to the Review column. "
                         "A review agent will run full code review and may "
                         "return the card to ready via kanban_request_changes "
-                        "until approved; humans merge after review-required block."
+                        "until approved; "
+                        + (
+                            "approved decomposed subtasks complete to done "
+                            "(human review on the epic root)."
+                            if defer
+                            else "humans merge after review-required block."
+                        )
                     ),
                 )
             return _ok(task_id=tid, run_id=run.id if run else None)
@@ -635,13 +660,43 @@ def _handle_block(args: dict, **kw) -> str:
     reason = args.get("reason")
     if not reason or not str(reason).strip():
         return tool_error("reason is required — explain what input you need")
+    reason_str = str(reason).strip()
     board = args.get("board")
     try:
         kb, conn = _connect(board=board)
         try:
+            if (
+                os.environ.get("HERMES_KANBAN_REVIEW") == "1"
+                and reason_str.lower().startswith("review-required:")
+                and not kb.task_requires_human_review_after_sdlc(conn, tid)
+            ):
+                ok = kb.complete_task(
+                    conn, tid,
+                    result=reason_str,
+                    summary=reason_str,
+                    expected_run_id=_worker_run_id(tid),
+                    allow_from_review=True,
+                )
+                if not ok:
+                    return tool_error(
+                        f"could not approve {tid} from review "
+                        f"(unknown id or not in review)"
+                    )
+                run = kb.latest_run(conn, tid)
+                return _ok(
+                    task_id=tid,
+                    run_id=run.id if run else None,
+                    status="done",
+                    review_approved=True,
+                    message=(
+                        "SDLC approved — decomposed subtask marked done "
+                        "(review-required block skipped; human review on "
+                        "epic root)."
+                    ),
+                )
             ok = kb.block_task(
                 conn, tid,
-                reason=reason,
+                reason=reason_str,
                 expected_run_id=_worker_run_id(tid),
             )
             if not ok:

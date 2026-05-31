@@ -1789,6 +1789,11 @@ DEFAULT_CONFIG = {
         # ``allow_complete_without_review: true`` to disable.
         "require_review_workspace_kinds": ["worktree", "dir"],
         "allow_complete_without_review": False,
+        # When true (default), tasks created by kanban decompose skip the
+        # review-required human block after SDLC approval — they go straight
+        # to done so siblings and the epic root can continue. Human sign-off
+        # is expected on the decompose epic root (or standalone tasks).
+        "defer_human_review_to_decompose_root": True,
     },
 
     # execute_code settings — controls the tool used for programmatic tool calls.

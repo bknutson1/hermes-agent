@@ -3265,6 +3265,65 @@ def _kanban_config() -> dict:
         return {}
 
 
+def _parse_event_payload(payload: Optional[str]) -> dict:
+    if not payload:
+        return {}
+    try:
+        parsed = json.loads(payload)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def task_decompose_root_id(conn: sqlite3.Connection, task_id: str) -> Optional[str]:
+    """Return the epic root id when ``task_id`` was created by ``decompose``."""
+    row = conn.execute(
+        "SELECT payload FROM task_events "
+        "WHERE task_id = ? AND kind = 'created' "
+        "ORDER BY id ASC LIMIT 1",
+        (task_id,),
+    ).fetchone()
+    if not row:
+        return None
+    root = _parse_event_payload(row["payload"]).get("from_decompose_of")
+    if not isinstance(root, str):
+        return None
+    root = root.strip()
+    return root or None
+
+
+def task_is_decomposed_child(conn: sqlite3.Connection, task_id: str) -> bool:
+    return task_decompose_root_id(conn, task_id) is not None
+
+
+def task_is_decompose_epic_root(conn: sqlite3.Connection, task_id: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM task_events WHERE task_id = ? AND kind = 'decomposed' LIMIT 1",
+        (task_id,),
+    ).fetchone()
+    return row is not None
+
+
+def task_requires_human_review_after_sdlc(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    kanban_cfg: Optional[dict] = None,
+) -> bool:
+    """Return True when an Approved SDLC review should ``review-required`` block.
+
+  When ``defer_human_review_to_decompose_root`` is true (default), decomposed
+  child tasks complete to ``done`` after automated review so sibling work can
+  continue; human sign-off is expected on the epic root (or standalone tasks).
+    """
+    cfg = kanban_cfg if kanban_cfg is not None else _kanban_config()
+    if not cfg.get("defer_human_review_to_decompose_root", True):
+        return True
+    if task_is_decomposed_child(conn, task_id):
+        return False
+    return True
+
+
 def task_requires_review_before_complete(
     task: Task,
     metadata: Optional[dict] = None,
@@ -3377,6 +3436,7 @@ def complete_task(
     created_cards: Optional[Iterable[str]] = None,
     expected_run_id: Optional[int] = None,
     enforce_review: bool = False,
+    allow_from_review: bool = False,
 ) -> bool:
     """Transition ``running|ready -> done`` and record ``result``.
 
@@ -3448,10 +3508,17 @@ def complete_task(
                 expected_run_id=expected_run_id,
             )
 
+    terminal_statuses = ("running", "ready", "blocked")
+    if allow_from_review:
+        terminal_statuses = terminal_statuses + ("review",)
+    status_sql = ", ".join(f"'{s}'" for s in terminal_statuses)
+    completion_outcome = "review_approved" if allow_from_review else "completed"
+    completion_status = "review_approved" if allow_from_review else "done"
+
     with write_txn(conn):
         if expected_run_id is None:
             cur = conn.execute(
-                """
+                f"""
                 UPDATE tasks
                    SET status       = 'done',
                        result       = ?,
@@ -3460,13 +3527,13 @@ def complete_task(
                        claim_expires= NULL,
                        worker_pid   = NULL
                  WHERE id = ?
-                   AND status IN ('running', 'ready', 'blocked')
+                   AND status IN ({status_sql})
                 """,
                 (result, now, task_id),
             )
         else:
             cur = conn.execute(
-                """
+                f"""
                 UPDATE tasks
                    SET status       = 'done',
                        result       = ?,
@@ -3475,7 +3542,7 @@ def complete_task(
                        claim_expires= NULL,
                        worker_pid   = NULL
                  WHERE id = ?
-                   AND status IN ('running', 'ready', 'blocked')
+                   AND status IN ({status_sql})
                    AND current_run_id = ?
                 """,
                 (result, now, task_id, int(expected_run_id)),
@@ -3484,7 +3551,7 @@ def complete_task(
             return False
         run_id = _end_run(
             conn, task_id,
-            outcome="completed", status="done",
+            outcome=completion_outcome, status=completion_status,
             summary=summary if summary is not None else result,
             metadata=metadata,
         )
@@ -3495,7 +3562,7 @@ def complete_task(
         if run_id is None and (summary or metadata or result):
             run_id = _synthesize_ended_run(
                 conn, task_id,
-                outcome="completed",
+                outcome=completion_outcome,
                 summary=summary if summary is not None else result,
                 metadata=metadata,
             )
@@ -6285,7 +6352,9 @@ def dispatch_once(
     # Review tasks are tasks that a worker moved to 'review' after
     # creating a PR.  The dispatcher spawns a review agent (loading
     # sdlc-review skill) that runs full code review: request_changes
-    # loop until Approved, then review-required block for human merge.
+    # loop until Approved, then review-required block for human merge
+    # (decomposed subtasks may complete to done when
+    # defer_human_review_to_decompose_root is enabled).
     #
     # Same concurrency model as ready dispatch: review spawns count
     # against max_spawn alongside ready tasks, so the total number of
@@ -7086,6 +7155,28 @@ def build_worker_context(conn: sqlite3.Connection, task_id: str) -> str:
             safe_author = (c.author or "").replace("`", "")
             lines.append(f"comment from worker `{safe_author}` at {ts}:")
             lines.append(_cap(c.body, _CTX_MAX_COMMENT_BYTES))
+            lines.append("")
+
+    if task.status == "review":
+        if not task_requires_human_review_after_sdlc(conn, task_id):
+            root = task_decompose_root_id(conn, task_id) or "(epic root)"
+            lines.append("## SDLC review handoff (decomposed subtask)")
+            lines.append(
+                "This card is a **decomposed subtask**. After **Verdict: "
+                "Approved** (zero Critical, zero Warning), call "
+                "`kanban_complete(summary=...)` to mark it **done** — do "
+                "**not** `kanban_block(review-required:...)`. Human "
+                "sign-off is deferred to the decompose epic root "
+                f"(`{root}`) when the full graph finishes."
+            )
+            lines.append("")
+        elif task_is_decompose_epic_root(conn, task_id):
+            lines.append("## SDLC review handoff (decompose epic root)")
+            lines.append(
+                "This is the **decompose epic root**. After Approved, call "
+                "`kanban_block(reason=\"review-required: ...\")` so a human "
+                "can review the combined work."
+            )
             lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"

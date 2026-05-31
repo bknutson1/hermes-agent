@@ -25,8 +25,11 @@ This is an **automated review loop** before human merge:
 implementer kanban_complete → review → YOU
   → issues found?  kanban_comment + kanban_request_changes → ready (implementer fixes, re-submits)
   → repeat until Verdict: Approved (zero Critical, zero Warning)
-  → kanban_comment + kanban_block(review-required:…) → blocked (human merge/sign-off)
+  → decomposed subtask (default): kanban_comment + kanban_complete → done
+  → epic root / standalone: kanban_comment + kanban_block(review-required:…) → blocked
 ```
+
+When `kanban.defer_human_review_to_decompose_root` is true (default), **decomposed child** cards (created by `kanban decompose`) must **`kanban_complete` to done** after Approved — not `review-required` block. Human merge/sign-off is on the **epic root** when the graph finishes. `kanban_block(review-required:…)` on a subtask is auto-converted to done by the kernel.
 
 Do **not** `kanban_block(review-required:…)` while any Critical or Warning remains. Suggestions alone do not block the loop.
 
@@ -48,13 +51,13 @@ On **re-review** (card returned from a prior `kanban_request_changes`), verify e
 4. `kanban_comment` with **Code Review Summary** (template) — **before** any status transition.
 5. Verdict:
    - **Changes Requested** (any Critical or Warning) → `kanban_request_changes(reason="code review: …")` — one-line reason; details in comment.
-   - **Approved** (zero Critical, zero Warning) → `kanban_block(reason="review-required: …")` — human merge after automated pass.
+   - **Approved** (zero Critical, zero Warning) → decomposed subtask: `kanban_complete(summary=…)`; epic root / standalone: `kanban_block(reason="review-required: …")`.
 
 ## What not to do
 
 | Wrong | Right |
 |-------|-------|
-| `kanban_complete` → done | `kanban_block(review-required:…)` only after Approved verdict |
+| `kanban_complete` → done on subtasks | `kanban_block(review-required:…)` on epic root / standalone after Approved |
 | `kanban_block` with open Critical/Warning | `kanban_request_changes` → loop until clean |
 | Spot-check only / trust implementer test counts | Re-run cited tests; read every changed file |
 | `gh pr merge` by default | Human merges after `review-required` block |
