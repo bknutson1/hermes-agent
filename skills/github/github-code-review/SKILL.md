@@ -1,7 +1,7 @@
 ---
 name: github-code-review
 description: "Review PRs: diffs, inline comments via gh or REST."
-version: 1.1.0
+version: 1.1.1
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -441,12 +441,23 @@ curl -s -X POST \
 
 In addition to inline comments, leave a top-level summary so the PR author gets the full picture at a glance. Use the review output format from `references/review-output-template.md`.
 
+Always include the full GitHub PR URL on the **PR:** line (`https://github.com/owner/repo/pull/N`), not only the number — required for Kanban **PR Status** when the summary is posted via `kanban_comment`.
+
+**Resolve PR URL for the summary header:**
+
+```bash
+PR_URL=$(gh pr view $PR_NUMBER --json url --jq .url)
+# curl: ... pulls/$PR_NUMBER ... | jq -r .html_url
+```
+
 **With gh:**
 ```bash
 gh pr comment $PR_NUMBER --body "$(cat <<'EOF'
 ## Code Review Summary
 
 **Verdict: Changes Requested** (2 issues, 1 suggestion)
+
+**PR:** https://github.com/owner/repo/pull/123 — Short title from gh pr view
 
 ### 🔴 Critical
 - **src/auth.py:45** — SQL injection vulnerability
@@ -485,6 +496,8 @@ git branch -D pr-$PR_NUMBER
 ## 6. Kanban SDLC review (`HERMES_KANBAN_REVIEW=1`)
 
 When spawned as the Kanban **review** agent (not a casual PR review), load `sdlc-review` and use **this skill’s Section 3 checklist** plus `references/review-output-template.md` for the `kanban_comment` body.
+
+On every `kanban_comment` **Code Review Summary**, the **PR:** line must be the full `https://github.com/.../pull/N` URL (from implementer handoff, `gh pr view --json url`, or the task thread). Do not use `**PR:** #181` alone — the board cannot link PR status from a bare number.
 
 | GitHub PR review | Kanban SDLC review |
 |------------------|-------------------|

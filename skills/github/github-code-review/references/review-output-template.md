@@ -9,7 +9,7 @@ Use this as the structure for PR review summary comments. Copy and fill in the s
 
 **Verdict: [Approved ✅ | Changes Requested 🔴 | Reviewed 💬]** ([N] issues, [N] suggestions)
 
-**PR:** #[number] — [title]
+**PR:** https://github.com/[owner]/[repo]/pull/[number] — [title]
 **Author:** @[username]
 **Files changed:** [N] (+[additions] -[deletions])
 
@@ -68,6 +68,12 @@ Prefix inline comments with the severity icon so they're scannable:
 ```
 ✅ **Nice:** Good use of context manager here — ensures cleanup on exceptions.
 ```
+
+## PR URL (required for Kanban)
+
+When the summary is posted via `kanban_comment` (SDLC review on the Hermes Kanban board), the **PR:** line must include the full `https://github.com/.../pull/N` URL — not only `#N` or `PR #N`. The dashboard **PR Status** widget discovers links from comments and run history; a number alone is not enough.
+
+Copy the URL from the implementer handoff (`metadata.pr`, `metadata.pr_url`, prior run summary), from `gh pr view <N> --json url --jq .url`, or from the PR the user linked. If no PR exists yet, omit the **PR:** line and say so in the verdict section.
 
 ## For Local (Pre-Push) Review
 

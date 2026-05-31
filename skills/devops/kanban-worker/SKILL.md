@@ -53,6 +53,8 @@ kanban_complete(
 
 Call `kanban_complete` with full handoff in `summary` + `metadata`. The kernel routes the card to the **Review** column for a **full code review** loop — the review agent returns the card to `ready` via `kanban_request_changes` until clean, then `review-required:` block for human merge.
 
+When opening a PR (`gh pr create` or API), do **not** add tool branding to the title/body (`Made with Cursor`, `Made with Hermes`, or agent co-author trailers). If **Create PR** is set on the task, the worker context repeats this rule.
+
 ```python
 kanban_complete(
     summary="shipped rate limiter — 14/14 tests, PR #42 open",
@@ -64,6 +66,8 @@ kanban_complete(
     },
 )
 ```
+
+**PR URL in handoffs (dashboard badges, merge auto-complete):** always include the **full** `https://github.com/.../pull/N` in `metadata.pr` and/or the implementer run `summary`. Review agents often cite only `**PR:** #N` in their run summary — `find_pr_urls_for_tasks` scans up to 16 recent `task_runs` (newest first) and stops at the first row with a parseable URL; `#N` alone is not enough. If no run or comment has the full URL, the board shows no PR link until someone edits metadata or comments. Details: `references/kanban-pr-url-discovery.md`.
 
 Scratch tasks complete to `done` normally. Review agents (`HERMES_KANBAN_REVIEW=1`): see `sdlc-review` — full code review; `kanban_request_changes` on Critical/Warning until Approved, then `kanban_block(review-required:...)`. Never `kanban_complete`.
 
@@ -193,5 +197,6 @@ Board slug `roguelike-td`: **triage** cards are rough captures — leave them **
 
 - `references/kanban-dashboard-attention-strip.md` — "N tasks need attention" banner, dismiss persistence, removed block→unblock cycling diagnostic
 - `references/kanban-review-column.md` — Review column vs Blocked `review-required` vs separate reviewer task; SDLC flow and config knobs
+- `references/kanban-pr-url-discovery.md` — full GitHub PR URLs in handoffs vs review-only `PR: #N`; how the dashboard resolves links
 - `references/rogueliketd-triage-from-ideas-backlog.md` — triage card from Ideas checklist markdown (not `ideas_create`)
 - `references/rogueliketd-tower-archetype-triage.md` — triage bodies for proposed tower archetypes

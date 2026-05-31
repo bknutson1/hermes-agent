@@ -1691,6 +1691,7 @@ def test_build_worker_context_includes_create_pr_requirement(kanban_home):
         ctx = kb.build_worker_context(conn, tid)
         assert "pull request required" in ctx
         assert "gh pr create" in ctx
+        assert "Made with Cursor" in ctx  # anti-branding rule names the pattern
     finally:
         conn.close()
 

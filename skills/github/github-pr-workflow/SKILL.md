@@ -111,6 +111,8 @@ git push -u origin HEAD
 
 ### Create the PR
 
+Do **not** append tool branding to the PR body (`Made with Cursor`, `Made with Hermes`, markdown footers, or `Co-authored-by` agent trailers). Write only task-relevant summary and test plan content. Cursor users: disable **PR Attribution** in Cursor Settings → Agents → Attribution, or set `attributePRsToAgent`: false in `~/.cursor/cli-config.json` — details: `references/cursor-pr-attribution.md`.
+
 **With gh:**
 
 ```bash

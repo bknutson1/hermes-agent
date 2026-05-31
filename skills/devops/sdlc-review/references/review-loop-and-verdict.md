@@ -39,7 +39,7 @@ When `kanban_show` shows a prior review comment with Critical/Warning items:
 
 ## Comment before transition (always)
 
-Post the structured **Code Review Summary** via `kanban_comment` **before** `kanban_request_changes` or `kanban_block`. The `reason` on those tools is a one-line dashboard label; the comment is the authoritative fix list / approval record.
+Post the structured **Code Review Summary** via `kanban_comment` **before** `kanban_request_changes` or `kanban_block`. The `reason` on those tools is a one-line dashboard label; the comment is the authoritative fix list / approval record. The **PR:** header must include the full `https://github.com/.../pull/N` URL so the dashboard **PR Status** row can link the task.
 
 ## `kanban_request_changes` reason line
 

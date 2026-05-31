@@ -244,7 +244,10 @@ KANBAN_GUIDANCE = (
     "specialist profile.\n"
     "- Do not call `delegate_task` as a board substitute. `delegate_task` is "
     "for short reasoning subtasks inside your own run; board tasks are for "
-    "cross-agent handoffs that outlive one API loop."
+    "cross-agent handoffs that outlive one API loop.\n"
+    "- Do not add tool branding to git commits, PR descriptions, or board "
+    "comments (e.g. \"Made with Cursor\", \"Made with Hermes\", or "
+    "Co-authored-by agent trailers)."
 )
 
 TOOL_USE_ENFORCEMENT_GUIDANCE = (

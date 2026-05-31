@@ -39,6 +39,36 @@ def test_find_pr_url_from_comment(kanban_home):
     assert urls[task_id] == "https://github.com/acme/widget/pull/7"
 
 
+def test_find_pr_url_from_older_run_when_latest_lacks_url(kanban_home):
+    """Review handoffs often cite PR: #N; the worker run may hold the full URL."""
+    with kb.connect() as conn:
+        task_id = kb.create_task(conn, title="review-pr", assignee="alice")
+        now = int(time.time())
+        conn.execute(
+            "INSERT INTO task_runs (task_id, status, outcome, started_at, ended_at, summary) "
+            "VALUES (?, 'done', 'submitted_for_review', ?, ?, ?)",
+            (
+                task_id,
+                now - 120,
+                now - 60,
+                "shipped feature — PR: https://github.com/acme/widget/pull/181",
+            ),
+        )
+        conn.execute(
+            "INSERT INTO task_runs (task_id, status, outcome, started_at, ended_at, summary) "
+            "VALUES (?, 'done', 'blocked', ?, ?, ?)",
+            (
+                task_id,
+                now - 30,
+                now,
+                "## Code Review Summary\n\n**PR:** #181 — fix widgets",
+            ),
+        )
+        conn.commit()
+        urls = kp.find_pr_urls_for_tasks(conn, [task_id])
+    assert urls[task_id] == "https://github.com/acme/widget/pull/181"
+
+
 def test_find_pr_url_from_run_summary(kanban_home):
     with kb.connect() as conn:
         task_id = kb.create_task(conn, title="run-pr", assignee="alice")

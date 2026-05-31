@@ -6939,6 +6939,11 @@ def build_worker_context(conn: sqlite3.Connection, task_id: str) -> str:
             "- Put the PR URL in your completion `summary` and in `metadata` "
             "(e.g. `metadata={\"pr_url\": \"https://github.com/.../pull/N\"}`)"
         )
+        lines.append(
+            "- Do **not** add tool branding to the PR title/body or comments "
+            "(no \"Made with Cursor\", \"Made with Hermes\", co-authored-by "
+            "agent trailers, or similar)"
+        )
         lines.append("")
 
     if task.body and task.body.strip():

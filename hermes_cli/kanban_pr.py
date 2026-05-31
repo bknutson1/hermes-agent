@@ -90,6 +90,23 @@ def _first_pr_url_in_texts(texts: Iterable[str]) -> Optional[str]:
     return None
 
 
+def _pr_url_from_run_row(row) -> Optional[str]:
+    """Extract a GitHub PR URL from a ``task_runs`` row (summary, error, metadata)."""
+    texts: list[str] = []
+    if row["summary"]:
+        texts.append(row["summary"])
+    error = row["error"] if "error" in row.keys() else None
+    if error:
+        texts.append(error)
+    if row["metadata"]:
+        try:
+            meta = json.loads(row["metadata"])
+        except (TypeError, json.JSONDecodeError):
+            meta = None
+        texts.extend(_iter_searchable_strings(meta))
+    return _first_pr_url_in_texts(texts)
+
+
 def _parse_github_pr_path(url: str) -> Optional[tuple[str, str, int]]:
     match = re.match(
         r"https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)",
@@ -283,9 +300,9 @@ def find_pr_urls_for_tasks(
         run_placeholders = ",".join("?" for _ in remaining)
         run_rows = conn.execute(
             f"""
-            SELECT task_id, summary, metadata
+            SELECT task_id, summary, metadata, error
               FROM (
-                SELECT task_id, summary, metadata,
+                SELECT task_id, summary, metadata, error,
                        ROW_NUMBER() OVER (
                          PARTITION BY task_id
                          ORDER BY COALESCE(ended_at, started_at) DESC, id DESC
@@ -297,24 +314,13 @@ def find_pr_urls_for_tasks(
             """,
             tuple(remaining) + (_PR_DISCOVERY_RUNS_PER_TASK,),
         ).fetchall()
-        seen_runs: set[str] = set()
         for row in run_rows:
             tid = row["task_id"]
-            if tid in found or tid in seen_runs:
+            if tid in found:
                 continue
-            texts: list[str] = []
-            if row["summary"]:
-                texts.append(row["summary"])
-            if row["metadata"]:
-                try:
-                    meta = json.loads(row["metadata"])
-                except (TypeError, json.JSONDecodeError):
-                    meta = None
-                texts.extend(_iter_searchable_strings(meta))
-            url = _first_pr_url_in_texts(texts)
+            url = _pr_url_from_run_row(row)
             if url:
                 found[tid] = url
-            seen_runs.add(tid)
 
     remaining = [tid for tid in ids if tid not in found]
     if remaining:

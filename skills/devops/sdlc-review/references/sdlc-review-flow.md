@@ -73,7 +73,7 @@ Use `github-code-review` → `references/review-output-template.md`:
 - **Verdict: Changes Requested** if any Critical or Warning.
 - **Verdict: Approved** only if zero Critical and zero Warning.
 
-Include: files reviewed count, tests re-run, AC mapping, PR link, residual risk (human merge caveats only — not a bucket for code defects).
+Include: files reviewed count, tests re-run, AC mapping, **full PR URL** on the **PR:** line (`https://github.com/.../pull/N` — see `github-code-review` → `references/review-output-template.md`), residual risk (human merge caveats only — not a bucket for code defects).
 
 ## Hand off
 
