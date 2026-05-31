@@ -56,8 +56,9 @@ In the commit body or footer:
 Closes #42          ← closes the issue when merged
 Fixes #42           ← same effect
 Refs #42            ← references without closing
-Co-authored-by: Name <email>
 ```
+
+Do **not** add agent or IDE trailers (`Co-authored-by: Cursor`, `Made-with: Cursor`, etc.) — see `cursor-pr-attribution.md`. Human `Co-authored-by: Name <email>` footers are only for intentional paired human commits, never for agent attribution.
 
 ## Quick Decision Guide
 

@@ -1,7 +1,7 @@
 ---
 name: kanban-worker
 description: Pitfalls, examples, and edge cases for Hermes Kanban workers. The lifecycle itself is auto-injected into every worker's system prompt as KANBAN_GUIDANCE (from agent/prompt_builder.py); this skill is what you load when you want deeper detail on specific scenarios.
-version: 2.0.8
+version: 2.0.9
 platforms: [linux, macos, windows]
 metadata:
   hermes:
@@ -53,7 +53,7 @@ kanban_complete(
 
 Call `kanban_complete` with full handoff in `summary` + `metadata`. The kernel routes the card to the **Review** column for a **full code review** loop — the review agent returns the card to `ready` via `kanban_request_changes` until clean, then `review-required:` block for human merge.
 
-When opening a PR (`gh pr create` or API), do **not** add tool branding to the title/body (`Made with Cursor`, `Made with Hermes`, or agent co-author trailers). If **Create PR** is set on the task, the worker context repeats this rule.
+When opening a PR (`gh pr create` or API), do **not** add tool branding to the title/body (`Made with Cursor`, `Made with Hermes`, or agent co-author trailers). Same rule for **`git commit`**: do not add or keep `Co-authored-by: Cursor` / `Made-with: Cursor` trailers — disable Commit Attribution in Cursor and set `attributeCommitsToAgent`: false (`github-pr-workflow` → `references/cursor-pr-attribution.md`). If **Create PR** is set on the task, the worker context repeats this rule.
 
 ```python
 kanban_complete(

@@ -1,7 +1,7 @@
 ---
 name: github-pr-workflow
 description: "GitHub PR lifecycle: branch, commit, open, CI, merge."
-version: 1.1.0
+version: 1.1.1
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -101,6 +101,8 @@ Longer explanation if needed. Wrap at 72 characters.
 
 Types: `feat`, `fix`, `refactor`, `docs`, `test`, `ci`, `chore`, `perf`
 
+Do **not** append agent or IDE branding to commit messages (`Co-authored-by: Cursor`, `Made-with: Cursor`, etc.). Cursor users: disable **Commit Attribution** in Settings → Agents → Attribution and set `attributeCommitsToAgent`: false in `~/.cursor/cli-config.json` — details: `references/cursor-pr-attribution.md`.
+
 ## 3. Pushing and Creating a PR
 
 ### Push the Branch (same either way)
@@ -111,7 +113,7 @@ git push -u origin HEAD
 
 ### Create the PR
 
-Do **not** append tool branding to the PR body (`Made with Cursor`, `Made with Hermes`, markdown footers, or `Co-authored-by` agent trailers). Write only task-relevant summary and test plan content. Cursor users: disable **PR Attribution** in Cursor Settings → Agents → Attribution, or set `attributePRsToAgent`: false in `~/.cursor/cli-config.json` — details: `references/cursor-pr-attribution.md`.
+Do **not** append tool branding to the PR body (`Made with Cursor`, `Made with Hermes`, markdown footers, or `Co-authored-by` agent trailers). Write only task-relevant summary and test plan content. Cursor users: disable **PR Attribution** and **Commit Attribution** in Cursor Settings → Agents → Attribution, or set `attributePRsToAgent` and `attributeCommitsToAgent` to `false` in `~/.cursor/cli-config.json` — details: `references/cursor-pr-attribution.md`.
 
 **With gh:**
 
