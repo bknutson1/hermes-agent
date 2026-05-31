@@ -504,6 +504,48 @@
     ]);
   }
 
+  const IDEAS_CODE_HIGHLIGHT_THEME = {
+    atrule: "ideas-lexical-token-atrule",
+    attr: "ideas-lexical-token-attr",
+    boolean: "ideas-lexical-token-boolean",
+    builtin: "ideas-lexical-token-builtin",
+    cdata: "ideas-lexical-token-cdata",
+    char: "ideas-lexical-token-char",
+    class: "ideas-lexical-token-class",
+    comment: "ideas-lexical-token-comment",
+    constant: "ideas-lexical-token-constant",
+    deleted: "ideas-lexical-token-deleted",
+    doctype: "ideas-lexical-token-doctype",
+    entity: "ideas-lexical-token-entity",
+    function: "ideas-lexical-token-function",
+    important: "ideas-lexical-token-important",
+    inserted: "ideas-lexical-token-inserted",
+    keyword: "ideas-lexical-token-keyword",
+    namespace: "ideas-lexical-token-namespace",
+    number: "ideas-lexical-token-number",
+    operator: "ideas-lexical-token-operator",
+    prolog: "ideas-lexical-token-prolog",
+    property: "ideas-lexical-token-property",
+    punctuation: "ideas-lexical-token-punctuation",
+    regex: "ideas-lexical-token-regex",
+    selector: "ideas-lexical-token-selector",
+    string: "ideas-lexical-token-string",
+    symbol: "ideas-lexical-token-symbol",
+    tag: "ideas-lexical-token-tag",
+    url: "ideas-lexical-token-url",
+    variable: "ideas-lexical-token-variable",
+  };
+
+  function IdeasCodeHighlightPlugin() {
+    const L = SDK.lexical;
+    const [editor] = L.useLexicalComposerContext();
+    useEffect(() => {
+      if (!L.registerCodeHighlighting) return undefined;
+      return L.registerCodeHighlighting(editor);
+    }, [editor, L]);
+    return null;
+  }
+
   function LexicalMarkdownEditor({ markdown, onMarkdownChange, editorKey }) {
     const L = SDK.lexical;
     if (!L) {
@@ -533,6 +575,7 @@
         list: { ul: "ideas-lexical-ul", ol: "ideas-lexical-ol", listitem: "ideas-lexical-li", nested: { listitem: "ideas-lexical-nested-li" }, checklist: "ideas-lexical-checklist", listitemChecked: "ideas-lexical-checked", listitemUnchecked: "ideas-lexical-unchecked" },
         text: { bold: "ideas-lexical-bold", italic: "ideas-lexical-italic", code: "ideas-lexical-inline-code" },
         code: "ideas-lexical-codeblock",
+        codeHighlight: IDEAS_CODE_HIGHLIGHT_THEME,
         link: "ideas-lexical-link",
       },
       nodes: [
@@ -555,6 +598,7 @@
     }, [L, markdownTransformers, onMarkdownChange]);
     return h(L.LexicalComposer, { initialConfig },
       h("div", { className: "ideas-lexical-editor" },
+        h(IdeasCodeHighlightPlugin, null),
         h(L.RichTextPlugin, {
           contentEditable: h(L.ContentEditable, { className: "ideas-lexical-content", spellCheck: true }),
           placeholder: h("div", { className: "ideas-lexical-placeholder" }, "Type markdown shortcuts naturally: #, ##, ###, -, [], ``` …"),

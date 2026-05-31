@@ -5,6 +5,16 @@
   min-height: calc(100vh - 9rem);
 }
 
+/* Theme globals paint <code>/<pre> with --foreground, which is transparent on
+ * LENS_0 (Hermes teal). Editor prose inherits the visible midground text
+ * color; nested <code> blocks do not — they look empty until selected.
+ * Reset inside the plugin, then opt back in on intentional pill surfaces. */
+.ideas-page code:not(.ideas-lexical-codeblock):not(.ideas-lexical-inline-code),
+.ideas-page pre {
+  background: transparent !important;
+  color: inherit;
+}
+
 .ideas-header {
   display: flex;
   align-items: flex-start;
@@ -324,19 +334,27 @@
 .ideas-block-content code {
   border-radius: .25rem;
   padding: .08rem .28rem;
-  background: rgba(127, 127, 127, .18);
+  background: rgba(127, 127, 127, .18) !important;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  color: inherit !important;
+  -webkit-text-fill-color: currentColor !important;
 }
 
 .ideas-block-code .ideas-block-content {
   grid-column: 2 / 4;
   min-height: 4.5rem;
-  padding: .7rem .8rem;
-  border: 1px solid var(--border);
-  border-radius: .55rem;
-  background: color-mix(in srgb, var(--card) 84%, black);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  margin: .35rem 0 .55rem;
+  padding: 1rem 1.1rem;
+  border: none;
+  border-radius: .45rem;
+  background: color-mix(in srgb, currentColor 9%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 12%, transparent);
+  font-family: var(--theme-font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace);
+  font-size: .8125rem;
+  line-height: 1.55;
   white-space: pre-wrap;
+  color: inherit !important;
+  -webkit-text-fill-color: currentColor !important;
 }
 
 .ideas-block-code .ideas-block-content:empty::before {
@@ -402,9 +420,23 @@
 
 .ideas-preview pre {
   overflow: auto;
-  border-radius: .65rem;
-  padding: .8rem;
-  background: rgba(0, 0, 0, .35);
+  border-radius: .45rem;
+  margin: .35rem 0 .55rem;
+  padding: 1rem 1.1rem;
+  background: color-mix(in srgb, currentColor 9%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 12%, transparent);
+  color: inherit;
+  font-family: var(--theme-font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace);
+  font-size: .8125rem;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.ideas-preview pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
 }
 
 .ideas-preview code {
@@ -412,6 +444,7 @@
   background: rgba(127, 127, 127, .18);
   border-radius: .25rem;
   padding: .08rem .28rem;
+  color: inherit;
 }
 
 .ideas-bottom-actions {
@@ -530,7 +563,9 @@
   border: 1px solid var(--border);
   border-radius: .75rem;
   padding: 1rem 1.1rem;
-  font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.55;
   color: inherit !important;
   -webkit-text-fill-color: currentColor !important;
   caret-color: currentColor !important;
@@ -581,20 +616,79 @@
 .ideas-lexical-inline-code {
   border-radius: .25rem;
   padding: .08rem .28rem;
-  background: rgba(127, 127, 127, .18);
+  background: rgba(127, 127, 127, .18) !important;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  color: inherit !important;
+  -webkit-text-fill-color: currentColor !important;
 }
 
-.ideas-lexical-codeblock {
+/* Notion-style fenced code block: lifted surface on the editor canvas */
+.ideas-lexical-content .ideas-lexical-codeblock {
   display: block;
-  min-height: 4.5rem;
-  margin: .45rem 0;
-  padding: .7rem .8rem;
-  border: 1px solid var(--border);
-  border-radius: .55rem;
-  background: color-mix(in srgb, var(--card) 84%, black);
-  white-space: pre-wrap;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 2.75rem;
+  margin: .35rem 0 .55rem;
+  padding: 1rem 1.1rem;
+  border: none;
+  border-radius: .45rem;
+  background: color-mix(in srgb, currentColor 9%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 12%, transparent);
+  font-family: var(--theme-font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace);
+  font-size: .8125rem;
+  line-height: 1.55;
+  white-space: pre;
+  overflow-x: auto;
   tab-size: 2;
+  color: inherit !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+
+.ideas-lexical-codeblock * {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.ideas-lexical-codeblock *:not([class*="ideas-lexical-token-"]) {
+  color: inherit;
+  -webkit-text-fill-color: unset;
+}
+
+/* Prism token colors (Notion dark palette) */
+.ideas-lexical-codeblock .ideas-lexical-token-comment,
+.ideas-lexical-codeblock .ideas-lexical-token-prolog,
+.ideas-lexical-codeblock .ideas-lexical-token-doctype {
+  color: color-mix(in srgb, currentColor 48%, transparent) !important;
+}
+
+.ideas-lexical-codeblock .ideas-lexical-token-keyword,
+.ideas-lexical-codeblock .ideas-lexical-token-function,
+.ideas-lexical-codeblock .ideas-lexical-token-builtin,
+.ideas-lexical-codeblock .ideas-lexical-token-atrule {
+  color: #e5c07b !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+
+.ideas-lexical-codeblock .ideas-lexical-token-string,
+.ideas-lexical-codeblock .ideas-lexical-token-char,
+.ideas-lexical-codeblock .ideas-lexical-token-attr,
+.ideas-lexical-codeblock .ideas-lexical-token-regex {
+  color: #ce9178 !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+
+.ideas-lexical-codeblock .ideas-lexical-token-number,
+.ideas-lexical-codeblock .ideas-lexical-token-constant,
+.ideas-lexical-codeblock .ideas-lexical-token-symbol {
+  color: #b5cea8 !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+
+.ideas-lexical-codeblock .ideas-lexical-token-class,
+.ideas-lexical-codeblock .ideas-lexical-token-tag {
+  color: #4ec9b0 !important;
+  -webkit-text-fill-color: currentColor !important;
 }
 
 .ideas-lexical-quote {

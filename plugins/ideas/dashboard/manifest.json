@@ -3,7 +3,7 @@
   "label": "Ideas",
   "description": "Project-aware markdown idea tracker tied to Kanban boards",
   "icon": "Lightbulb",
-  "version": "0.2.4",
+  "version": "0.2.6",
   "tab": {
     "path": "/ideas",
     "position": "after:kanban"

@@ -45,7 +45,12 @@ import { TabIndentationPlugin } from "@lexical/react/LexicalTabIndentationPlugin
 import { $convertFromMarkdownString, $convertToMarkdownString, CHECK_LIST, HEADING, ORDERED_LIST, TRANSFORMERS, UNORDERED_LIST } from "@lexical/markdown";
 import { HeadingNode, QuoteNode, $createHeadingNode, $createQuoteNode } from "@lexical/rich-text";
 import { ListItemNode, ListNode, INSERT_CHECK_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND, REMOVE_LIST_COMMAND } from "@lexical/list";
-import { CodeHighlightNode, CodeNode, $createCodeNode } from "@lexical/code";
+import {
+  CodeHighlightNode,
+  CodeNode,
+  $createCodeNode,
+  registerCodeHighlighting,
+} from "@lexical/code";
 import { AutoLinkNode, LinkNode } from "@lexical/link";
 import { $getSelection, $isRangeSelection, $createParagraphNode, FORMAT_TEXT_COMMAND } from "lexical";
 import { $setBlocksType } from "@lexical/selection";
@@ -215,6 +220,7 @@ export function exposePluginSDK() {
         $createQuoteNode,
         $createCodeNode,
       },
+      registerCodeHighlighting,
     },
   };
 }
