@@ -1,7 +1,7 @@
 ---
 name: hermes-ideas
 description: Markdown Ideas (ideas_* tools, /ideas, dashboard) — not Kanban triage tasks. Load when the user says idea, ideas page, draft, or list/create ideas on a board.
-version: 1.2.0
+version: 1.3.0
 platforms: [linux, macos, windows]
 metadata:
   hermes:
@@ -55,6 +55,14 @@ After code or toolset changes, the user may need a **new session** or `/reload` 
 5. **Cursor / `hermes-tools` MCP kwargs nesting.** Symptom: `ideas_boards()` is correct but `ideas_list(all_boards=true)` or `ideas_list(board="…")` always lists only the empty **default** board. The MCP client schema may expose a single required `kwargs` object while the handler expects **top-level** keys (`all_boards`, `board`, `idea_id`). Calling `{"kwargs": {"all_boards": true}}` double-nests args so filters are ignored. Retry with flat top-level parameters when the schema allows; otherwise fix/unblock `agent/transports/hermes_tools_mcp_server.py` (pass Hermes `parameters` to `add_tool`, unwrap a lone `kwargs` dict in `_dispatch`). Details: `references/cursor-hermes-tools-mcp.md`.
 
 More session-derived detail: `references/pitfalls-and-commands.md`.
+
+## Dashboard editor (Lexical)
+
+The Ideas tab is a Lexical markdown editor in `plugins/ideas/dashboard/`. User expects **Notion-like fenced code blocks** (visible panel, mono font, syntax colors) — not bare inline `<code>` that blends into prose.
+
+**Hermes LENS / teal theme pitfall:** global dashboard CSS sets `--foreground` transparent on layered themes. Prose uses midground text via `color: inherit`, but nested `<code>` / `<pre>` still pick up `--foreground` → fenced blocks look empty until selected. **Fix pattern:** scope a reset under `.ideas-page` (see Kanban's `.hermes-kanban` reset), then style `.ideas-lexical-codeblock` with `color-mix` background + inset border. Register Lexical `registerCodeHighlighting` in `web/src/plugins/registry.ts` and rebuild `plugins/ideas/dashboard/dist/`.
+
+Detail and file paths: `references/dashboard-lens-code-blocks.md`.
 
 ## CLI / slash (humans)
 
