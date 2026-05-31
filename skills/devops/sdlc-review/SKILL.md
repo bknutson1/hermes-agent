@@ -1,7 +1,7 @@
 ---
 name: sdlc-review
 description: Full code review on Kanban Review column — loop via kanban_request_changes until clean, then review-required block for human merge. Never merge autonomously.
-version: 2.0.0
+version: 2.0.1
 platforms: [linux, macos, windows]
 metadata:
   hermes:
@@ -60,7 +60,18 @@ On **re-review** (card returned from a prior `kanban_request_changes`), verify e
 | `gh pr merge` by default | Human merges after `review-required` block |
 | Re-implement the feature | Comment + `kanban_request_changes` |
 
+## RoguelikeTD: Godot GDScript gates (mandatory when diff touches `.gd`)
+
+**Before Approved** when any changed path matches `Scripts/**/*.gd`:
+
+1. **Gate 1** — `--headless --quit-after 1` (exit `0`). **Not sufficient alone** — does not parse lazy-loaded effect scripts.
+2. **Gate 4** — `--script tests/godot/sdlc_parse_smoke.gd` when present; `tests.test_gdscript_const_init_static` when present. Skipping Gate 4 when smoke script exists → **Critical**.
+3. **Gate 2** — tower subclass shadow `var` grep. **Gate 3** — `test_tower_subclass_gdscript_static`.
+
+Frost Obelisk miss: `const FALL_DIR = Vector2(-1,1).normalized()` in `frost_slow_aura.gd` passed Gate 1, crashed at run start. Details: `references/rogueliketd-godot-gdscript-review-gates.md`.
+
 ## Reference
 
 - `references/sdlc-review-flow.md` — orient, full review steps, platform notes, handoff
 - `references/review-loop-and-verdict.md` — loop diagram, severity → action, re-review rules
+- `references/rogueliketd-godot-gdscript-review-gates.md` — Gates 1–4 (headless, parse smoke, tower grep, static tests)

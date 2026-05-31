@@ -123,7 +123,12 @@ unset HERMES_KANBAN_REVIEW   # bash
 
 1. Re-run the **named module list** from metadata — do not trust counts without evidence.
 2. Windows: clear `PYTHONHOME` / `PYTHONPATH`; use system Python if uv breaks stdlib.
-3. `godot --headless --path . --quit-after 1` when AC requires parse/load proof; else note in residual risk.
+3. **Godot GDScript gates (mandatory)** — if **any** path in the review union matches `Scripts/**/*.gd`, follow `references/rogueliketd-godot-gdscript-review-gates.md`:
+   - Gate 1: `godot --headless --path . --quit-after 1` (exit `0`). Skipping → **Critical**.
+   - Gate 4: `godot --headless --path . --script tests/godot/sdlc_parse_smoke.gd` when that file exists — parses all `Scripts/**/*.gd`, including lazy-loaded effect scripts. Skipping when present → **Critical**. Also run `tests.test_gdscript_const_init_static` when present.
+   - Gate 2: grep tower subclass shadow `var` redeclarations.
+   - Gate 3: re-run `tests.test_tower_subclass_gdscript_static` when present.
+   - Record `godot_headless_exit` and `godot_parse_smoke_exit` in the review comment.
 4. Unstaged `*Curve.tres` not in PR → residual risk unless AC required those files.
 5. **Deferred AC** only when task body or `metadata.acceptance` explicitly defers — otherwise missing deferred work is a **Warning** (or Critical if AC-required).
 
@@ -147,6 +152,7 @@ Re-run cited tests in `tests/plugins/test_kanban_dashboard_plugin.py` with `-o a
 | `kanban_block` with open Critical/Warning | Skips the fix loop — use `kanban_request_changes` |
 | `kanban_complete` | Tool error on review runs |
 | Spot-check / AC-only pass | Violates full code review mandate |
+| Approve after `--quit-after 1` only on `.gd` diff | Misses lazy-loaded scripts — run `sdlc_parse_smoke.gd` when present |
 | `gh pr merge` | Out of scope unless task orders merge |
 | Re-implementing | `kanban_request_changes`; implementer picks up from `ready` |
 | Empty `kanban_block` reason | Use `review-required:` prefix |
