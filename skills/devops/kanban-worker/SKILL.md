@@ -191,6 +191,7 @@ Board slug `roguelike-td`: **triage** cards are rough captures — leave them **
 
 ## Reference
 
+- `references/kanban-dashboard-attention-strip.md` — "N tasks need attention" banner, dismiss persistence, removed block→unblock cycling diagnostic
 - `references/kanban-review-column.md` — Review column vs Blocked `review-required` vs separate reviewer task; SDLC flow and config knobs
 - `references/rogueliketd-triage-from-ideas-backlog.md` — triage card from Ideas checklist markdown (not `ideas_create`)
 - `references/rogueliketd-tower-archetype-triage.md` — triage bodies for proposed tower archetypes

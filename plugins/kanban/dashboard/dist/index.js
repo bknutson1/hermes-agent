@@ -245,6 +245,27 @@
   // can inspect any board without shifting the CLI's active board out
   // from under a terminal they left open.
   const LS_BOARD_KEY = "hermes.kanban.selectedBoard";
+  const LS_ATTENTION_DISMISSED_KEY = "hermes.kanban.attentionDismissed";
+
+  function readDismissedAttentionIds(boardSlug) {
+    try {
+      const raw = window.localStorage.getItem(LS_ATTENTION_DISMISSED_KEY);
+      if (!raw) return new Set();
+      const parsed = JSON.parse(raw);
+      const ids = parsed[boardSlug || "default"];
+      if (!Array.isArray(ids)) return new Set();
+      return new Set(ids.filter(function (id) { return typeof id === "string" && id; }));
+    } catch (_e) { return new Set(); }
+  }
+
+  function writeDismissedAttentionIds(boardSlug, idSet) {
+    try {
+      const raw = window.localStorage.getItem(LS_ATTENTION_DISMISSED_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      parsed[boardSlug || "default"] = Array.from(idSet);
+      window.localStorage.setItem(LS_ATTENTION_DISMISSED_KEY, JSON.stringify(parsed));
+    } catch (_e) { /* quota / private mode */ }
+  }
 
   function readSelectedBoard() {
     try {
@@ -1096,6 +1117,7 @@
         }) : null,
         h(AttentionStrip, {
           boardData,
+          boardSlug: board,
           onOpen: setSelectedTaskId,
         }),
         h(BoardToolbar, {
@@ -1166,8 +1188,8 @@
   // -------------------------------------------------------------------------
   // Attention strip — surfaces every task with active diagnostics,
   // severity-marked (warning/error/critical). Collapsed by default; click
-  // Show to expand into per-task rows with Open buttons. Dismissible
-  // per session via state flag.
+  // Show to expand into per-task rows with Open buttons. Dismiss hides
+  // tasks until their diagnostics clear (persisted per board in localStorage).
   // -------------------------------------------------------------------------
 
   function collectDiagTasks(boardData) {
@@ -1200,16 +1222,41 @@
 
   function AttentionStrip(props) {
     const { t } = useI18n();
+    const boardSlug = props.boardSlug || "default";
     const [expanded, setExpanded] = useState(false);
-    const [dismissed, setDismissed] = useState(false);
+    const [dismissedIds, setDismissedIds] = useState(function () {
+      return readDismissedAttentionIds(boardSlug);
+    });
+    useEffect(function () {
+      setDismissedIds(readDismissedAttentionIds(boardSlug));
+    }, [boardSlug]);
     const diagTasks = useMemo(
       function () { return collectDiagTasks(props.boardData); },
       [props.boardData]
     );
-    if (dismissed || diagTasks.length === 0) return null;
+    useEffect(function () {
+      const active = new Set(diagTasks.map(function (td) { return td.id; }));
+      setDismissedIds(function (prev) {
+        let changed = false;
+        const next = new Set();
+        prev.forEach(function (id) {
+          if (active.has(id)) next.add(id);
+          else changed = true;
+        });
+        if (changed) writeDismissedAttentionIds(boardSlug, next);
+        return next;
+      });
+    }, [diagTasks, boardSlug]);
+    const visibleTasks = useMemo(
+      function () {
+        return diagTasks.filter(function (td) { return !dismissedIds.has(td.id); });
+      },
+      [diagTasks, dismissedIds]
+    );
+    if (visibleTasks.length === 0) return null;
     // Pick the highest severity present so we can colour the strip.
     let topSev = "warning";
-    for (const td of diagTasks) {
+    for (const td of visibleTasks) {
       const s = (td.warnings && td.warnings.highest_severity) || "warning";
       if (s === "critical") { topSev = "critical"; break; }
       if (s === "error" && topSev !== "critical") topSev = "error";
@@ -1224,10 +1271,10 @@
         h("span", { className: "hermes-kanban-attention-icon" },
           topSev === "critical" ? "!!!" : topSev === "error" ? "!!" : "⚠"),
         h("span", { className: "hermes-kanban-attention-text" },
-          diagTasks.length === 1
+          visibleTasks.length === 1
             ? tx(t, "taskNeedsAttention", "1 task needs attention")
             : tx(t, "tasksNeedAttention", "{n} tasks need attention",
-                { n: diagTasks.length }),
+                { n: visibleTasks.length }),
         ),
         h("button", {
           className: "hermes-kanban-attention-toggle",
@@ -1236,14 +1283,19 @@
         }, expanded ? tx(t, "hide", "Hide") : tx(t, "show", "Show")),
         h("button", {
           className: "hermes-kanban-attention-dismiss",
-          onClick: function () { setDismissed(true); },
-          title: "Hide until next page reload",
+          onClick: function () {
+            const next = new Set(dismissedIds);
+            for (const td of visibleTasks) next.add(td.id);
+            writeDismissedAttentionIds(boardSlug, next);
+            setDismissedIds(next);
+          },
+          title: "Dismiss until this task's diagnostics clear",
           type: "button",
         }, "\u2715"),
       ),
       expanded
         ? h("div", { className: "hermes-kanban-attention-list" },
-            diagTasks.map(function (task) {
+            visibleTasks.map(function (task) {
               const sev = (task.warnings && task.warnings.highest_severity) || "warning";
               const kinds = task.warnings && task.warnings.kinds ? Object.keys(task.warnings.kinds) : [];
               return h("div", {
