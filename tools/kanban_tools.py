@@ -823,6 +823,9 @@ def _handle_create(args: dict, **kw) -> str:
     triage, bool_error = _parse_bool_arg(args, "triage")
     if bool_error:
         return tool_error(bool_error)
+    create_pr, bool_error = _parse_bool_arg(args, "create_pr")
+    if bool_error:
+        return tool_error(bool_error)
     idempotency_key = args.get("idempotency_key")
     max_runtime_seconds = args.get("max_runtime_seconds")
     initial_status = args.get("initial_status") or "running"
@@ -864,6 +867,7 @@ def _handle_create(args: dict, **kw) -> str:
                 initial_status=str(initial_status),
                 created_by=os.environ.get("HERMES_PROFILE") or "worker",
                 session_id=session_id,
+                create_pr=bool(create_pr),
             )
             new_task = kb.get_task(conn, new_tid)
             return _ok(
@@ -1324,6 +1328,13 @@ KANBAN_CREATE_SCHEMA = {
                     "If true, task lands in 'triage' instead of 'todo' "
                     "— a specifier profile is expected to flesh out "
                     "the body before work starts."
+                ),
+            },
+            "create_pr": {
+                "type": "boolean",
+                "description": (
+                    "If true, the assigned worker must push a branch and "
+                    "open a GitHub pull request before kanban_complete."
                 ),
             },
             "idempotency_key": {

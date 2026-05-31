@@ -3084,6 +3084,7 @@
     const [workspaceKind, setWorkspaceKind] = useState("scratch");
     const [workspacePath, setWorkspacePath] = useState("");
     const [baseBranch, setBaseBranch] = useState(DEFAULT_WORKTREE_BASE_BRANCH);
+    const [createPr, setCreatePr] = useState(false);
 
     const submit = function () {
       const trimmed = title.trim();
@@ -3113,9 +3114,11 @@
       if (workspaceKind === "worktree") {
         body.base_branch = (baseBranch || DEFAULT_WORKTREE_BASE_BRANCH).trim();
       }
+      if (createPr) body.create_pr = true;
       props.onSubmit(body);
       setTitle(""); setAssignee(""); setPriority(0); setParent(""); setSkills("");
       setWorkspaceKind("scratch"); setWorkspacePath(""); setBaseBranch(DEFAULT_WORKTREE_BASE_BRANCH);
+      setCreatePr(false);
     };
 
     const showPathInput = workspaceKind !== "scratch";
@@ -3213,6 +3216,18 @@
             `${task.id} — ${(task.title || "").slice(0, 50)}`);
         }),
       ),
+      props.columnName === "triage"
+        ? h("label", {
+            className: "flex items-center gap-2 text-xs",
+            title: "When checked, the worker must open a GitHub pull request before completing.",
+          },
+            h(Checkbox, {
+              checked: createPr,
+              onCheckedChange: function (checked) { setCreatePr(checked === true); },
+            }),
+            tx(t, "createPr", "Create PR when worker starts"),
+          )
+        : null,
       h("div", { className: "flex gap-2" },
         h(Button, {
           onClick: submit,
@@ -3534,6 +3549,7 @@
             boardSlug: props.boardSlug,
             onPatch: props.onPatch,
           }),
+          h(CreatePrEditor, { task: t, onPatch: props.onPatch }),
           (t.skills && t.skills.length > 0) ? h(MetaRow, {
             label: tx(i18n, "skills", "Skills"),
             value: t.skills.join(", "),
@@ -3972,6 +3988,36 @@
           return h("option", { key: a, value: a }, a);
         }),
       ),
+    );
+  }
+
+  const CREATE_PR_EDITABLE = { triage: 1, todo: 1, ready: 1 };
+
+  function CreatePrEditor(props) {
+    const { t } = useI18n();
+    const task = props.task;
+    const editable = !!CREATE_PR_EDITABLE[task.status];
+    const checked = !!task.create_pr;
+    if (!editable && !checked) return null;
+    return h("div", { className: "hermes-kanban-meta-row" },
+      h("span", { className: "hermes-kanban-meta-label" },
+        tx(t, "createPr", "Create PR")),
+      editable
+        ? h("label", {
+            className: "flex items-center gap-2 text-xs hermes-kanban-meta-value",
+            title: tx(t, "createPrHint",
+              "Worker must open a GitHub pull request before completing."),
+          },
+            h(Checkbox, {
+              checked: checked,
+              onCheckedChange: function (next) {
+                props.onPatch({ create_pr: next === true });
+              },
+            }),
+            tx(t, "createPrWhenWorkerStarts",
+              "Require PR when worker starts"),
+          )
+        : h("span", { className: "hermes-kanban-meta-value" }, "required"),
     );
   }
 

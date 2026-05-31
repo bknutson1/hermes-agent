@@ -1682,6 +1682,30 @@ def test_build_worker_context_includes_prior_attempts(kanban_home):
         conn.close()
 
 
+def test_build_worker_context_includes_create_pr_requirement(kanban_home):
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(
+            conn, title="ship feature", assignee="coder", create_pr=True,
+        )
+        ctx = kb.build_worker_context(conn, tid)
+        assert "pull request required" in ctx
+        assert "gh pr create" in ctx
+    finally:
+        conn.close()
+
+
+def test_update_task_create_pr_rejected_when_running(kanban_home):
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(conn, title="x", assignee="coder", create_pr=True)
+        kb.claim_task(conn, tid)
+        ok = kb.update_task_create_pr(conn, tid, create_pr=False)
+        assert ok is False
+    finally:
+        conn.close()
+
+
 def test_build_worker_context_uses_parent_run_summary(kanban_home):
     """Downstream children read the parent's run.summary + metadata, not
     just task.result."""

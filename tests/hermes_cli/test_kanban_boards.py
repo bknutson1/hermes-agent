@@ -429,6 +429,39 @@ class TestWorkerSpawnEnv:
         expected_ws = fresh_home / "kanban" / "boards" / "spawntest" / "workspaces"
         assert env["HERMES_KANBAN_WORKSPACES_ROOT"] == str(expected_ws)
 
+    def test_default_spawn_sets_create_pr_env_var(self, fresh_home, monkeypatch):
+        captured = {}
+
+        class FakeProc:
+            pid = 99
+
+        def fake_popen(cmd, *args, **kwargs):
+            captured["env"] = kwargs.get("env", {})
+            return FakeProc()
+
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+        task = kb.Task(
+            id="t_pr",
+            title="pr task",
+            body=None,
+            assignee="teknium",
+            status="ready",
+            priority=0,
+            created_by="user",
+            created_at=0,
+            started_at=None,
+            completed_at=None,
+            workspace_kind="worktree",
+            workspace_path=None,
+            claim_lock=None,
+            claim_expires=None,
+            tenant=None,
+            create_pr=True,
+        )
+        kb._default_spawn(task, str(fresh_home / "ws"))
+        assert captured["env"]["HERMES_KANBAN_CREATE_PR"] == "1"
+
     def test_default_board_spawn_keeps_legacy_paths(self, fresh_home, monkeypatch):
         captured = {}
 

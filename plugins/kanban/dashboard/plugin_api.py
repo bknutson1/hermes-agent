@@ -597,6 +597,7 @@ class CreateTaskBody(BaseModel):
     idempotency_key: Optional[str] = None
     max_runtime_seconds: Optional[int] = None
     skills: Optional[list[str]] = None
+    create_pr: bool = False
 
 
 @router.post("/tasks")
@@ -621,6 +622,7 @@ def create_task(payload: CreateTaskBody, board: Optional[str] = Query(None)):
             idempotency_key=payload.idempotency_key,
             max_runtime_seconds=payload.max_runtime_seconds,
             skills=payload.skills,
+            create_pr=bool(payload.create_pr),
         )
         task = kanban_db.get_task(conn, task_id)
         body: dict[str, Any] = {"task": _task_dict(task) if task else None}
@@ -728,6 +730,7 @@ class UpdateTaskBody(BaseModel):
     # complete --summary ... --metadata ...``.
     summary: Optional[str] = None
     metadata: Optional[dict] = None
+    create_pr: Optional[bool] = None
 
 
 @router.patch("/tasks/{task_id}")
@@ -826,6 +829,25 @@ def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Qu
                 raise HTTPException(
                     status_code=409,
                     detail=f"status transition to {s!r} not valid from current state",
+                )
+
+        # --- create PR flag -----------------------------------------------
+        if payload.create_pr is not None:
+            try:
+                ok = kanban_db.update_task_create_pr(
+                    conn,
+                    task_id,
+                    create_pr=bool(payload.create_pr),
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            if not ok:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "create_pr can only be changed while the task is in "
+                        "triage, todo, or ready (before a worker starts)"
+                    ),
                 )
 
         # --- priority -----------------------------------------------------

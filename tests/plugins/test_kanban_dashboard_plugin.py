@@ -140,6 +140,30 @@ def test_scheduled_tasks_have_their_own_column_not_todo(client):
     assert not any(t["id"] == task["id"] for t in columns["todo"])
 
 
+def test_patch_create_pr_on_triage_task(client):
+    task = client.post(
+        "/api/plugins/kanban/tasks",
+        json={"title": "needs pr", "triage": True},
+    ).json()["task"]
+    assert task["status"] == "triage"
+    assert not task.get("create_pr")
+
+    r = client.patch(
+        f"/api/plugins/kanban/tasks/{task['id']}",
+        json={"create_pr": True},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["task"]["create_pr"] is True
+
+
+def test_create_task_with_create_pr_flag(client):
+    task = client.post(
+        "/api/plugins/kanban/tasks",
+        json={"title": "pr at create", "triage": True, "create_pr": True},
+    ).json()["task"]
+    assert task["create_pr"] is True
+
+
 def test_patch_workspace_on_triage_task_before_specification(client, tmp_path):
     task = client.post(
         "/api/plugins/kanban/tasks",

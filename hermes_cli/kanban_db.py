@@ -712,6 +712,9 @@ class Task:
     # set the env var. Lets clients render a per-session board without
     # relying on tenant + time-window heuristics.
     session_id: Optional[str] = None
+    # When True, the worker must push a branch and open a GitHub PR before
+    # completing (see HERMES_KANBAN_CREATE_PR and build_worker_context).
+    create_pr: bool = False
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Task":
@@ -782,6 +785,7 @@ class Task:
             session_id=(
                 row["session_id"] if "session_id" in keys else None
             ),
+            create_pr=bool(row["create_pr"]) if "create_pr" in keys and row["create_pr"] else False,
         )
 
 
@@ -920,7 +924,11 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- for tasks created from the CLI, dashboard, or any path that doesn't
     -- set the env var. Indexed so per-session list queries stay cheap on
     -- larger boards.
-    session_id           TEXT
+    session_id           TEXT,
+    -- When 1, the dispatcher sets HERMES_KANBAN_CREATE_PR on the worker and
+    -- build_worker_context instructs the agent to open a GitHub PR before
+    -- kanban_complete.
+    create_pr            INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS task_links (
@@ -1546,6 +1554,14 @@ def _migrate_add_optional_columns(conn: sqlite3.Connection) -> None:
             conn, "tasks", "session_id", "session_id TEXT"
         )
 
+    if "create_pr" not in cols:
+        _add_column_if_missing(
+            conn,
+            "tasks",
+            "create_pr",
+            "create_pr INTEGER NOT NULL DEFAULT 0",
+        )
+
     # Indexes over additive ``tasks`` columns must be created after the
     # columns exist. Keeping them in SCHEMA_SQL breaks legacy boards: SQLite
     # parses each statement in ``executescript`` against the live schema, so a
@@ -1789,6 +1805,7 @@ def create_task(
     max_retries: Optional[int] = None,
     initial_status: str = "running",
     session_id: Optional[str] = None,
+    create_pr: bool = False,
     board: Optional[str] = None,
 ) -> str:
     """Create a new task and optionally link it under parent tasks.
@@ -1959,8 +1976,8 @@ def create_task(
                         id, title, body, assignee, status, priority,
                         created_by, created_at, workspace_kind, workspace_path,
                         branch_name, base_branch, tenant, idempotency_key, max_runtime_seconds,
-                        skills, max_retries, session_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        skills, max_retries, session_id, create_pr
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         task_id,
@@ -1981,6 +1998,7 @@ def create_task(
                         json.dumps(skills_list) if skills_list is not None else None,
                         int(max_retries) if max_retries is not None else None,
                         session_id,
+                        1 if create_pr else 0,
                     ),
                 )
                 for pid in parents:
@@ -4462,6 +4480,41 @@ def set_workspace_path(
         )
 
 
+_CREATE_PR_EDITABLE_STATUSES = frozenset({"triage", "todo", "ready"})
+
+
+def update_task_create_pr(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    create_pr: bool,
+) -> bool:
+    """Set or clear the per-task **Create PR** flag before dispatch.
+
+    Returns False when the task is missing or already running/terminal.
+    """
+    with write_txn(conn):
+        row = conn.execute(
+            "SELECT status FROM tasks WHERE id = ?",
+            (task_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        if row["status"] not in _CREATE_PR_EDITABLE_STATUSES:
+            return False
+        conn.execute(
+            "UPDATE tasks SET create_pr = ? WHERE id = ?",
+            (1 if create_pr else 0, task_id),
+        )
+        _append_event(
+            conn,
+            task_id,
+            "edited",
+            {"create_pr": bool(create_pr)},
+        )
+    return True
+
+
 def update_task_workspace(
     conn: sqlite3.Connection,
     task_id: str,
@@ -6456,6 +6509,8 @@ def _default_spawn(
     env["HERMES_KANBAN_WORKSPACE"] = workspace
     if task.skills and "sdlc-review" in task.skills:
         env["HERMES_KANBAN_REVIEW"] = "1"
+    if task.create_pr:
+        env["HERMES_KANBAN_CREATE_PR"] = "1"
     if os.path.isdir(workspace):
         env["TERMINAL_CWD"] = workspace
         env["HERMES_CURSOR_AUX_CWD"] = workspace
@@ -6700,7 +6755,26 @@ def build_worker_context(conn: sqlite3.Connection, task_id: str) -> str:
         lines.append(f"Branch:   {task.branch_name}")
     if task.base_branch:
         lines.append(f"Base:     {task.base_branch}")
+    if task.create_pr:
+        lines.append("Create PR: required (open a GitHub pull request before completing)")
     lines.append("")
+
+    if task.create_pr:
+        lines.append("## Deliverable: pull request required")
+        lines.append(
+            "This task is flagged **Create PR**. Before `kanban_complete`, you MUST:"
+        )
+        lines.append(
+            "- Commit your changes on a feature branch in `$HERMES_KANBAN_WORKSPACE`"
+        )
+        lines.append(
+            "- Push the branch and open a GitHub pull request (`gh pr create`)"
+        )
+        lines.append(
+            "- Put the PR URL in your completion `summary` and in `metadata` "
+            "(e.g. `metadata={\"pr_url\": \"https://github.com/.../pull/N\"}`)"
+        )
+        lines.append("")
 
     if task.body and task.body.strip():
         lines.append("## Body")
