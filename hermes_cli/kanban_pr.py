@@ -28,6 +28,7 @@ GITHUB_PR_URL_RE = re.compile(
 
 _PR_STATUS_CACHE: dict[str, tuple[float, Optional["PullRequestInfo"]]] = {}
 _PR_STATUS_CACHE_TTL = 60.0
+_PR_STATUS_DB_TABLE = "pr_status_cache"
 # When scanning runs for PR URLs, only inspect recent rows per task (board load).
 _PR_DISCOVERY_RUNS_PER_TASK = 16
 PR_MERGED_SUMMARY_PREFIX = "PR Merged into "
@@ -151,28 +152,191 @@ def _pr_label(*, state: str, merged: bool, draft: bool) -> str:
     return state.capitalize() if state else "Unknown"
 
 
-def cached_pull_request_info(url: str) -> Optional[PullRequestInfo]:
+def _pr_info_is_unknown(info: Optional[PullRequestInfo]) -> bool:
+    """True when cache has no usable label (miss or failed fetch)."""
+    if info is None:
+        return True
+    if (info.label or "").strip().lower() == "unknown":
+        return True
+    return (info.state or "").strip().lower() == "unknown"
+
+
+def _ensure_pr_status_cache_table(conn) -> None:
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {_PR_STATUS_DB_TABLE} (
+            url TEXT PRIMARY KEY,
+            payload TEXT,
+            fetched_at INTEGER NOT NULL
+        )
+        """
+    )
+
+
+def _info_to_db_payload(info: Optional[PullRequestInfo]) -> Optional[str]:
+    if info is None:
+        return None
+    return json.dumps(info.to_dict(), ensure_ascii=False)
+
+
+def _info_from_db_payload(payload: Optional[str]) -> Optional[PullRequestInfo]:
+    if not payload:
+        return None
+    try:
+        data = json.loads(payload)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return PullRequestInfo(
+        url=str(data.get("url") or ""),
+        state=str(data.get("state") or "unknown"),
+        merged=bool(data.get("merged")),
+        draft=bool(data.get("draft")),
+        target_branch=str(data.get("target_branch") or ""),
+        label=str(data.get("label") or "Unknown"),
+    )
+
+
+def _load_pr_status_from_db(conn, url: str) -> Optional[PullRequestInfo]:
+    """Read a fresh PR status row from the board DB cache."""
+    normalized = normalize_github_pr_url(url)
+    _ensure_pr_status_cache_table(conn)
+    row = conn.execute(
+        f"SELECT payload, fetched_at FROM {_PR_STATUS_DB_TABLE} WHERE url = ?",
+        (normalized,),
+    ).fetchone()
+    if not row:
+        return None
+    if time.time() - int(row["fetched_at"]) >= _PR_STATUS_CACHE_TTL:
+        return None
+    return _info_from_db_payload(row["payload"])
+
+
+def _load_pr_status_batch_from_db(
+    conn,
+    urls: Iterable[str],
+) -> dict[str, Optional[PullRequestInfo]]:
+    """Batch-read PR status from the board DB (one query)."""
+    normalized = [normalize_github_pr_url(u) for u in urls]
+    normalized = list(dict.fromkeys(u for u in normalized if u))
+    if not normalized:
+        return {}
+    _ensure_pr_status_cache_table(conn)
+    now = time.time()
+    placeholders = ",".join("?" for _ in normalized)
+    rows = conn.execute(
+        f"SELECT url, payload, fetched_at FROM {_PR_STATUS_DB_TABLE} "
+        f"WHERE url IN ({placeholders})",
+        tuple(normalized),
+    ).fetchall()
+    out: dict[str, Optional[PullRequestInfo]] = {}
+    for row in rows:
+        if now - int(row["fetched_at"]) >= _PR_STATUS_CACHE_TTL:
+            continue
+        out[row["url"]] = _info_from_db_payload(row["payload"])
+    return out
+
+
+def _save_pr_status_to_db(
+    conn,
+    url: str,
+    info: Optional[PullRequestInfo],
+) -> None:
+    normalized = normalize_github_pr_url(url)
+    _ensure_pr_status_cache_table(conn)
+    conn.execute(
+        f"INSERT OR REPLACE INTO {_PR_STATUS_DB_TABLE} "
+        f"(url, payload, fetched_at) VALUES (?, ?, ?)",
+        (normalized, _info_to_db_payload(info), int(time.time())),
+    )
+
+
+def cached_pull_request_info(
+    url: str,
+    *,
+    conn=None,
+) -> Optional[PullRequestInfo]:
     """Return cached PR state when fresh; never hits the network."""
     normalized = normalize_github_pr_url(url)
     now = time.time()
     cached = _PR_STATUS_CACHE.get(normalized)
     if cached and now - cached[0] < _PR_STATUS_CACHE_TTL:
         return cached[1]
+    if conn is not None:
+        db_info = _load_pr_status_from_db(conn, normalized)
+        if db_info is not None:
+            _PR_STATUS_CACHE[normalized] = (now, db_info)
+            return db_info
+        # Fresh negative cache (fetch failed recently).
+        _ensure_pr_status_cache_table(conn)
+        row = conn.execute(
+            f"SELECT payload, fetched_at FROM {_PR_STATUS_DB_TABLE} WHERE url = ?",
+            (normalized,),
+        ).fetchone()
+        if row and now - int(row["fetched_at"]) < _PR_STATUS_CACHE_TTL:
+            if row["payload"] is None:
+                _PR_STATUS_CACHE[normalized] = (now, None)
+                return None
     return None
 
 
-def invalidate_pr_status_cache(url: Optional[str] = None) -> None:
+def invalidate_pr_status_cache(url: Optional[str] = None, *, conn=None) -> None:
     """Drop cached GitHub PR state so the next fetch is live."""
     if url is None:
         _PR_STATUS_CACHE.clear()
+        if conn is not None:
+            _ensure_pr_status_cache_table(conn)
+            conn.execute(f"DELETE FROM {_PR_STATUS_DB_TABLE}")
         return
     normalized = normalize_github_pr_url(url)
     _PR_STATUS_CACHE.pop(normalized, None)
+    if conn is not None:
+        _ensure_pr_status_cache_table(conn)
+        conn.execute(
+            f"DELETE FROM {_PR_STATUS_DB_TABLE} WHERE url = ?",
+            (normalized,),
+        )
 
 
-def _cache_pr_status(url: str, info: Optional[PullRequestInfo]) -> None:
+def _cache_pr_status(
+    url: str,
+    info: Optional[PullRequestInfo],
+    *,
+    conn=None,
+) -> None:
     normalized = normalize_github_pr_url(url)
     _PR_STATUS_CACHE[normalized] = (time.time(), info)
+    if conn is not None:
+        _save_pr_status_to_db(conn, normalized, info)
+
+
+def _batch_cached_pull_request_info(
+    conn,
+    urls: Iterable[str],
+) -> dict[str, Optional[PullRequestInfo]]:
+    """Resolve many PR URLs from memory + board DB only (no network)."""
+    unique = list(
+        dict.fromkeys(normalize_github_pr_url(u) for u in urls if u)
+    )
+    out: dict[str, Optional[PullRequestInfo]] = {}
+    need_db: list[str] = []
+    now = time.time()
+    for url in unique:
+        entry = _PR_STATUS_CACHE.get(url)
+        if entry and now - entry[0] < _PR_STATUS_CACHE_TTL:
+            out[url] = entry[1]
+            continue
+        need_db.append(url)
+    if need_db:
+        db_map = _load_pr_status_batch_from_db(conn, need_db)
+        for url in need_db:
+            if url not in db_map:
+                continue
+            info = db_map[url]
+            _PR_STATUS_CACHE[url] = (now, info)
+            out[url] = info
+    return out
 
 
 def _pr_status_from_merge_summary(summary: Optional[str], url: str) -> Optional[dict[str, Any]]:
@@ -204,18 +368,26 @@ def _task_merge_summary(task_dict: dict[str, Any]) -> Optional[str]:
     return None
 
 
-def fetch_pull_request_info(url: str, *, force_refresh: bool = False) -> Optional[PullRequestInfo]:
+def fetch_pull_request_info(
+    url: str,
+    *,
+    force_refresh: bool = False,
+    conn=None,
+) -> Optional[PullRequestInfo]:
     """Return live GitHub PR state for ``url``, with a short TTL cache."""
     normalized = normalize_github_pr_url(url)
     now = time.time()
     if not force_refresh:
-        cached = _PR_STATUS_CACHE.get(normalized)
-        if cached and now - cached[0] < _PR_STATUS_CACHE_TTL:
-            return cached[1]
+        cached = cached_pull_request_info(normalized, conn=conn)
+        if cached is not None and not _pr_info_is_unknown(cached):
+            return cached
+        entry = _PR_STATUS_CACHE.get(normalized)
+        if entry and now - entry[0] < _PR_STATUS_CACHE_TTL and entry[1] is None:
+            return None
 
     parsed = _parse_github_pr_path(normalized)
     if not parsed:
-        _cache_pr_status(normalized, None)
+        _cache_pr_status(normalized, None, conn=conn)
         return None
 
     owner, repo, number = parsed
@@ -261,7 +433,7 @@ def fetch_pull_request_info(url: str, *, force_refresh: bool = False) -> Optiona
     except Exception as exc:
         logger.debug("GitHub PR fetch error for %s: %s", normalized, exc)
 
-    _cache_pr_status(normalized, info)
+    _cache_pr_status(normalized, info, conn=conn)
     return info
 
 
@@ -366,11 +538,28 @@ def pr_info_for_task(
         if merged:
             return merged
 
+    cached = cached_pull_request_info(url, conn=conn)
+    if cached is not None and not _pr_info_is_unknown(cached):
+        return cached.to_dict()
+
     if not fetch_live:
-        return {"url": url, "label": "Unknown", "state": "unknown", "merged": False, "draft": False, "target_branch": ""}
-    info = fetch_pull_request_info(url)
-    if info:
-        return info.to_dict()
+        return {
+            "url": url,
+            "label": "Unknown",
+            "state": "unknown",
+            "merged": False,
+            "draft": False,
+            "target_branch": "",
+        }
+
+    # Drawer / explicit refresh: live fetch only when cache is missing or unknown.
+    if _pr_info_is_unknown(cached):
+        info = fetch_pull_request_info(url, force_refresh=True, conn=conn)
+        if info:
+            return info.to_dict()
+    elif cached is not None:
+        return cached.to_dict()
+
     return {
         "url": url,
         "label": "Unknown",
@@ -387,21 +576,41 @@ def attach_pr_status_to_task_dicts(
     *,
     fetch_live: bool = True,
     cache_only: bool = False,
+    resolve_unknown: bool = False,
 ) -> None:
-    """Mutate task dicts in place, adding a ``pr`` field when applicable."""
+    """Mutate task dicts in place, adding a ``pr`` field when applicable.
+
+    ``cache_only`` (board load): memory + per-board SQLite cache only — no
+    GitHub calls. ``resolve_unknown``: live fetch only for URLs whose cached
+    state is missing or ``Unknown`` (task drawer). Dispatcher merge sync uses
+    ``fetch_pull_request_info(..., force_refresh=True)`` directly.
+    """
     if not task_dicts:
         return
     urls = find_pr_urls_for_tasks(conn, [d["id"] for d in task_dicts])
     if not urls:
         return
 
+    unique_urls = list(dict.fromkeys(urls.values()))
     info_by_url: dict[str, Optional[PullRequestInfo]] = {}
-    if fetch_live:
-        for url in set(urls.values()):
-            if cache_only:
-                info_by_url[url] = cached_pull_request_info(url)
-            else:
-                info_by_url[url] = fetch_pull_request_info(url)
+    if cache_only:
+        info_by_url = _batch_cached_pull_request_info(conn, unique_urls)
+    elif fetch_live:
+        if resolve_unknown:
+            cached_map = _batch_cached_pull_request_info(conn, unique_urls)
+            for url in unique_urls:
+                norm = normalize_github_pr_url(url)
+                cached = cached_map.get(norm)
+                if _pr_info_is_unknown(cached):
+                    info_by_url[norm] = fetch_pull_request_info(
+                        url, force_refresh=True, conn=conn,
+                    )
+                else:
+                    info_by_url[norm] = cached
+        else:
+            for url in unique_urls:
+                norm = normalize_github_pr_url(url)
+                info_by_url[norm] = fetch_pull_request_info(url, conn=conn)
 
     for d in task_dicts:
         url = urls.get(d["id"])
@@ -412,8 +621,9 @@ def attach_pr_status_to_task_dicts(
             if merged:
                 d["pr"] = merged
                 continue
-        if fetch_live:
-            info = info_by_url.get(url)
+        if fetch_live or cache_only:
+            norm = normalize_github_pr_url(url)
+            info = info_by_url.get(norm)
             if info:
                 d["pr"] = info.to_dict()
             else:
@@ -456,7 +666,7 @@ def sync_merged_pull_requests(conn) -> list[str]:
 
     completed: list[str] = []
     for task_id, url in urls.items():
-        info = fetch_pull_request_info(url, force_refresh=True)
+        info = fetch_pull_request_info(url, force_refresh=True, conn=conn)
         if not info or not info.merged:
             continue
         summary = f"{PR_MERGED_SUMMARY_PREFIX}{info.target_branch or 'target branch'}"

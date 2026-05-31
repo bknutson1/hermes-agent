@@ -479,7 +479,8 @@ def get_board(
             board_task_dicts.append(d)
 
         try:
-            # Use in-process cache only — live GitHub fetch happens on GET /tasks/:id.
+            # Memory + board DB cache only — no GitHub on /board. Dispatcher
+            # merge sync and task drawer refresh populate the cache.
             kanban_pr.attach_pr_status_to_task_dicts(
                 conn, board_task_dicts, fetch_live=True, cache_only=True,
             )

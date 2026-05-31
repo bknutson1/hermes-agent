@@ -191,6 +191,86 @@ def test_attach_pr_status_to_task_dicts(kanban_home, monkeypatch):
     assert task_dicts[0]["pr"]["url"] == "https://github.com/acme/widget/pull/3"
 
 
+def test_attach_pr_status_cache_only_skips_live_fetch(kanban_home, monkeypatch):
+    kp._PR_STATUS_CACHE.clear()
+
+    with kb.connect() as conn:
+        task_id = kb.create_task(conn, title="cache-miss", assignee="alice")
+        kb.add_comment(
+            conn,
+            task_id,
+            "worker",
+            "https://github.com/acme/widget/pull/9",
+        )
+
+    with patch.object(kp, "fetch_pull_request_info") as mock_fetch:
+        with kb.connect() as conn:
+            task_dicts = [{"id": task_id}]
+            kp.attach_pr_status_to_task_dicts(
+                conn, task_dicts, fetch_live=True, cache_only=True,
+            )
+        mock_fetch.assert_not_called()
+
+    assert task_dicts[0]["pr"]["label"] == "Unknown"
+    assert task_dicts[0]["pr"]["url"].endswith("/pull/9")
+
+
+def test_attach_pr_status_cache_only_uses_db_cache(kanban_home, monkeypatch):
+    kp._PR_STATUS_CACHE.clear()
+    url = "https://github.com/acme/widget/pull/10"
+    open_pr = kp.PullRequestInfo(
+        url=url,
+        state="open",
+        merged=False,
+        draft=False,
+        target_branch="main",
+        label="Open",
+    )
+
+    with kb.connect() as conn:
+        task_id = kb.create_task(conn, title="cached", assignee="alice")
+        kb.add_comment(conn, task_id, "worker", url)
+        kp._save_pr_status_to_db(conn, url, open_pr)
+        conn.commit()
+
+    with patch.object(kp, "fetch_pull_request_info") as mock_fetch:
+        with kb.connect() as conn:
+            task_dicts = [{"id": task_id}]
+            kp.attach_pr_status_to_task_dicts(
+                conn, task_dicts, fetch_live=True, cache_only=True,
+            )
+        mock_fetch.assert_not_called()
+
+    assert task_dicts[0]["pr"]["label"] == "Open"
+
+
+def test_pr_info_for_task_fetches_only_when_unknown(kanban_home, monkeypatch):
+    kp._PR_STATUS_CACHE.clear()
+    url = "https://github.com/acme/widget/pull/11"
+
+    with kb.connect() as conn:
+        task_id = kb.create_task(conn, title="drawer", assignee="alice")
+        kb.add_comment(conn, task_id, "worker", url)
+
+    open_pr = kp.PullRequestInfo(
+        url=url,
+        state="open",
+        merged=False,
+        draft=False,
+        target_branch="main",
+        label="Open",
+    )
+
+    with patch.object(
+        kp, "fetch_pull_request_info", return_value=open_pr,
+    ) as mock_fetch:
+        with kb.connect() as conn:
+            pr = kp.pr_info_for_task(conn, task_id, fetch_live=True)
+
+    mock_fetch.assert_called_once()
+    assert pr["label"] == "Open"
+
+
 def test_attach_pr_status_uses_merge_summary_for_done_tasks(kanban_home, monkeypatch):
     kp._PR_STATUS_CACHE.clear()
 
