@@ -2047,6 +2047,106 @@ def get_task(conn: sqlite3.Connection, task_id: str) -> Optional[Task]:
     return Task.from_row(row) if row else None
 
 
+def _parse_event_payload_raw(payload: Any) -> dict:
+    if payload is None:
+        return {}
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, str):
+        try:
+            parsed = json.loads(payload)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _target_status_from_event(kind: str, payload: dict) -> Optional[str]:
+    """Map a task event kind to the board column the task entered."""
+    if kind == "created":
+        s = payload.get("status")
+        return str(s) if s else None
+    if kind == "status":
+        s = payload.get("status")
+        return str(s) if s else None
+    if kind in ("promoted", "promoted_manual"):
+        return "ready"
+    if kind == "specified":
+        return "todo"
+    if kind == "blocked":
+        return "blocked"
+    if kind == "scheduled":
+        return "scheduled"
+    if kind == "archived":
+        return "archived"
+    if kind == "unblocked":
+        s = payload.get("status")
+        return str(s) if s else "ready"
+    if kind == "reopened":
+        s = payload.get("to_status")
+        return str(s) if s else None
+    if kind == "completed":
+        return "done"
+    if kind == "claimed":
+        return "running"
+    if kind == "changes_requested":
+        return "ready"
+    if kind == "gave_up":
+        return "blocked"
+    if kind == "claim_rejected" and payload.get("reason") == "parents_not_done":
+        return "todo"
+    if kind == "completion_redirected_to_review":
+        return "review"
+    return None
+
+
+def status_entered_at_by_task_id(
+    conn: sqlite3.Connection,
+    tasks: Iterable[Task],
+) -> dict[str, int]:
+    """Return when each task most recently entered its current ``status``.
+
+    Derived from ``task_events`` (status transitions, claims, promotions,
+    etc.). Falls back to ``created_at`` when no matching transition appears
+    in the event log.
+    """
+    task_list = list(tasks)
+    if not task_list:
+        return {}
+    by_id = {t.id: t for t in task_list}
+    ids = list(by_id.keys())
+    entered: dict[str, dict[str, int]] = {tid: {} for tid in ids}
+    chunk_size = 400
+    for off in range(0, len(ids), chunk_size):
+        chunk = ids[off : off + chunk_size]
+        placeholders = ",".join("?" * len(chunk))
+        rows = conn.execute(
+            f"SELECT task_id, kind, payload, created_at, id "
+            f"FROM task_events WHERE task_id IN ({placeholders}) "
+            f"ORDER BY task_id ASC, created_at ASC, id ASC",
+            chunk,
+        ).fetchall()
+        for row in rows:
+            tid = row["task_id"]
+            if tid not in entered:
+                continue
+            target = _target_status_from_event(
+                row["kind"] or "",
+                _parse_event_payload_raw(row["payload"]),
+            )
+            if target:
+                entered[tid][target] = int(row["created_at"] or 0)
+
+    out: dict[str, int] = {}
+    for tid, task in by_id.items():
+        cur = task.status or "todo"
+        ts = entered[tid].get(cur)
+        if ts is None:
+            ts = int(task.created_at or 0)
+        out[tid] = ts
+    return out
+
+
 # Canonical sort-order mappings for ``hermes kanban list --sort``.
 # Each value is a raw SQL fragment appended after ``ORDER BY``.
 VALID_SORT_ORDERS: dict[str, str] = {

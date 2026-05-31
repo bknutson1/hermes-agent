@@ -246,6 +246,96 @@
   // from under a terminal they left open.
   const LS_BOARD_KEY = "hermes.kanban.selectedBoard";
   const LS_ATTENTION_DISMISSED_KEY = "hermes.kanban.attentionDismissed";
+  const LS_COLUMN_SORT_KEY = "hermes.kanban.columnSort";
+  const COLUMN_SORT_DEFAULT = "newest";
+
+  function readColumnSort(boardSlug, columnName) {
+    try {
+      const raw = window.localStorage.getItem(LS_COLUMN_SORT_KEY);
+      if (!raw) return COLUMN_SORT_DEFAULT;
+      const parsed = JSON.parse(raw);
+      const board = parsed[boardSlug || "default"];
+      if (!board || typeof board !== "object") return COLUMN_SORT_DEFAULT;
+      return board[columnName] || board.__default__ || COLUMN_SORT_DEFAULT;
+    } catch (_e) { return COLUMN_SORT_DEFAULT; }
+  }
+
+  function writeColumnSort(boardSlug, columnName, mode) {
+    try {
+      const raw = window.localStorage.getItem(LS_COLUMN_SORT_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      const key = boardSlug || "default";
+      if (!parsed[key] || typeof parsed[key] !== "object") {
+        parsed[key] = { __default__: COLUMN_SORT_DEFAULT };
+      }
+      parsed[key][columnName] = mode;
+      window.localStorage.setItem(LS_COLUMN_SORT_KEY, JSON.stringify(parsed));
+    } catch (_e) { /* quota / private mode */ }
+  }
+
+  function taskCreatedAt(task) {
+    const v = task && task.created_at;
+    if (typeof v === "number" && !isNaN(v)) return v;
+    if (typeof v === "string" && v) {
+      const n = Date.parse(v);
+      if (!isNaN(n)) return Math.floor(n / 1000);
+    }
+    return 0;
+  }
+
+  function taskColumnEnteredAt(task) {
+    const v = task && task.status_entered_at;
+    if (typeof v === "number" && !isNaN(v)) return v;
+    if (typeof v === "string" && v) {
+      const n = Date.parse(v);
+      if (!isNaN(n)) return Math.floor(n / 1000);
+    }
+    return taskCreatedAt(task);
+  }
+
+  function taskPriority(task) {
+    const p = Number(task && task.priority);
+    return isNaN(p) ? 0 : p;
+  }
+
+  function sortColumnTasks(tasks, mode) {
+    const list = (tasks || []).slice();
+    if (mode === "oldest") {
+      list.sort(function (a, b) {
+        const ca = taskColumnEnteredAt(a);
+        const cb = taskColumnEnteredAt(b);
+        if (ca !== cb) return ca - cb;
+        return String(a.id).localeCompare(String(b.id));
+      });
+      return list;
+    }
+    if (mode === "priority_desc") {
+      list.sort(function (a, b) {
+        const pa = taskPriority(a);
+        const pb = taskPriority(b);
+        if (pa !== pb) return pb - pa;
+        return taskCreatedAt(b) - taskCreatedAt(a);
+      });
+      return list;
+    }
+    if (mode === "priority_asc") {
+      list.sort(function (a, b) {
+        const pa = taskPriority(a);
+        const pb = taskPriority(b);
+        if (pa !== pb) return pa - pb;
+        return taskCreatedAt(a) - taskCreatedAt(b);
+      });
+      return list;
+    }
+    // newest first (default) — by time entered this column
+    list.sort(function (a, b) {
+      const ca = taskColumnEnteredAt(a);
+      const cb = taskColumnEnteredAt(b);
+      if (ca !== cb) return cb - ca;
+      return String(b.id).localeCompare(String(a.id));
+    });
+    return list;
+  }
 
   function readDismissedAttentionIds(boardSlug) {
     try {
@@ -2633,7 +2723,19 @@
     const { t } = useI18n();
     const [dragOver, setDragOver] = useState(false);
     const [showCreate, setShowCreate] = useState(false);
+    const [sortMode, setSortMode] = useState(function () {
+      return readColumnSort(props.boardSlug, props.column.name);
+    });
     const colRef = useRef(null);
+
+    useEffect(function () {
+      setSortMode(readColumnSort(props.boardSlug, props.column.name));
+    }, [props.boardSlug, props.column.name]);
+
+    const sortedTasks = useMemo(
+      function () { return sortColumnTasks(props.column.tasks, sortMode); },
+      [props.column.tasks, sortMode]
+    );
 
     // Listen for our synthetic touch-drop events from attachTouchDrag().
     useEffect(function () {
@@ -2674,14 +2776,14 @@
     const lanes = useMemo(function () {
       if (!props.laneByProfile || props.column.name !== "running") return null;
       const byProfile = {};
-      for (const tk of props.column.tasks) {
+      for (const tk of sortedTasks) {
         const key = tk.assignee || "(unassigned)";
         (byProfile[key] = byProfile[key] || []).push(tk);
       }
       return Object.keys(byProfile).sort().map(function (k) {
         return { assignee: k, tasks: byProfile[k] };
       });
-    }, [props.column, props.laneByProfile]);
+    }, [sortedTasks, props.column.name, props.laneByProfile]);
 
     const colHelp = getColumnHelp(t, props.column.name);
     const colLabel = getColumnLabel(t, props.column.name);
@@ -2724,6 +2826,26 @@
       ),
       h("div", { className: "hermes-kanban-column-sub" },
         colHelp || ""),
+      h("div", { className: "hermes-kanban-column-sort" },
+        h(Select, Object.assign({
+          value: sortMode,
+          title: tx(t, "columnSortHint", "Sort tasks in this column"),
+          className: "hermes-kanban-column-sort-select",
+        }, selectChangeHandler(function (v) {
+          const mode = v || COLUMN_SORT_DEFAULT;
+          setSortMode(mode);
+          writeColumnSort(props.boardSlug, props.column.name, mode);
+        })),
+          h(SelectOption, { value: "newest" },
+            tx(t, "columnSortNewest", "Newest first")),
+          h(SelectOption, { value: "oldest" },
+            tx(t, "columnSortOldest", "Oldest first")),
+          h(SelectOption, { value: "priority_desc" },
+            tx(t, "columnSortPriorityDesc", "Priority high → low")),
+          h(SelectOption, { value: "priority_asc" },
+            tx(t, "columnSortPriorityAsc", "Priority low → high")),
+        ),
+      ),
       showCreate ? h(InlineCreate, {
         columnName: props.column.name,
         boardSlug: props.boardSlug,
@@ -2734,7 +2856,7 @@
         onCancel: function () { setShowCreate(false); },
       }) : null,
       h("div", { className: "hermes-kanban-column-body" },
-        props.column.tasks.length === 0
+        sortedTasks.length === 0
           ? h("div", { className: "hermes-kanban-empty" }, tx(t, "noTasks", "— no tasks —"))
           : lanes
             ? lanes.map(function (lane) {
@@ -2759,7 +2881,7 @@
                   }),
                 );
               })
-            : props.column.tasks.map(function (tk) {
+            : sortedTasks.map(function (tk) {
                 return h(TaskCard, {
                   key: tk.id, task: tk,
                   selected: props.selectedIds.has(tk.id),

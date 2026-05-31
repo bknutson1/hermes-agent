@@ -456,6 +456,7 @@ def get_board(
         # for boards with hundreds of tasks). Truncated to a card-size
         # preview here — the full text is available via /tasks/:id.
         summary_map = kanban_db.latest_summaries(conn, [t.id for t in tasks])
+        status_entered = kanban_db.status_entered_at_by_task_id(conn, tasks)
 
         board_task_dicts: list[dict[str, Any]] = []
         for t in tasks:
@@ -464,6 +465,9 @@ def get_board(
                 full[:_CARD_SUMMARY_PREVIEW_CHARS] if full else None
             )
             d = _task_dict(t, latest_summary=preview, for_board=True)
+            d["status_entered_at"] = status_entered.get(
+                t.id, int(t.created_at or 0),
+            )
             d["link_counts"] = link_counts.get(t.id, {"parents": 0, "children": 0})
             d["comment_count"] = comment_counts.get(t.id, 0)
             d["progress"] = progress.get(t.id)  # None when the task has no children
