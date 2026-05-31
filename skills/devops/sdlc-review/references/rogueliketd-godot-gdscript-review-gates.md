@@ -104,11 +104,15 @@ When **any** path in the review union matches `Scripts/**/*.gd` (including `Scri
 If `tests/godot/sdlc_parse_smoke.gd` exists in the repo:
 
 ```bash
-"$GODOT" --headless --path . --script tests/godot/sdlc_parse_smoke.gd
+"$GODOT" --headless --path . --script tests/godot/sdlc_parse_smoke.gd 2>&1 | tee /tmp/godot-parse-smoke.log
 echo "parse_smoke_exit=$?"
 ```
 
-**Pass:** exit `0`. **Fail → Critical** (records which script failed to parse).
+**Pass:** exit `0` **and** stderr has no `SCRIPT ERROR`, `Parse Error`, `PARSE FAIL`, or `Too many arguments for "load()"`. **Fail → Critical** (records which script failed to parse).
+
+**Windows:** Prefer `Godot_*_console.exe` (not the GUI `godot.exe`) so `parse_smoke_exit` matches `quit(code)`. The GUI build can return exit `0` even when `sdlc_parse_smoke.gd` itself fails to load — always read the log, not only `$?`.
+
+**Smoke script API (Godot 4.5):** `ResourceLoader.load(path, type_hint, cache_mode)` — three arguments only. Do not pass an `Error` out-param; GDScript bindings reject a 4th argument and the harness never runs.
 
 ### 4b. Const-init static unittest
 
