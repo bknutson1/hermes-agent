@@ -102,6 +102,68 @@ def _git_ref_exists(repo_root: Path, ref: str) -> bool:
         return False
 
 
+def _remote_and_branch_for_fetch(
+    base_branch: Optional[str],
+) -> tuple[str, Optional[str]]:
+    """Map a kanban ``base_branch`` to ``git fetch <remote> [<branch>]``."""
+    ref = (base_branch or "").strip() or DEFAULT_WORKTREE_BASE_BRANCH
+    if ref.startswith("refs/remotes/"):
+        ref = ref[len("refs/remotes/") :]
+    if ref.startswith("origin/"):
+        remote, branch = ref.split("/", 1)
+        return remote, branch or None
+    if "/" in ref:
+        remote, branch = ref.split("/", 1)
+        return remote, branch or None
+    return "origin", ref
+
+
+def fetch_remote_base_ref(
+    repo_root: Path,
+    base_branch: Optional[str],
+    *,
+    timeout: int = 120,
+) -> bool:
+    """Update remote-tracking refs for the worktree base before provisioning.
+
+    ``origin/main`` (and similar) only reflects the real upstream tip after
+    ``git fetch``; without this, new worktrees branch from a stale local ref.
+    Returns True when fetch exited 0.
+    """
+    remote, branch = _remote_and_branch_for_fetch(base_branch)
+    args = ["git", "fetch", remote]
+    if branch:
+        args.append(branch)
+    args.append("--prune")
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=str(repo_root),
+        )
+    except Exception as exc:
+        logger.warning(
+            "git fetch before worktree failed for %s (%s %s): %s",
+            repo_root,
+            remote,
+            branch or "*",
+            exc,
+        )
+        return False
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        logger.warning(
+            "git fetch before worktree failed for %s (%s): %s",
+            repo_root,
+            " ".join(args[1:]),
+            detail or f"exit {result.returncode}",
+        )
+        return False
+    return True
+
+
 def resolve_worktree_base_ref(
     repo_root: Path,
     base_branch: Optional[str],
@@ -244,10 +306,9 @@ def ensure_worktree_workspace(
         )
 
     branch = (getattr(task, "branch_name", None) or "").strip() or f"wt/{task.id}"
-    base_ref = resolve_worktree_base_ref(
-        root,
-        getattr(task, "base_branch", None),
-    )
+    base_branch = getattr(task, "base_branch", None)
+    fetch_remote_base_ref(root, base_branch)
+    base_ref = resolve_worktree_base_ref(root, base_branch)
     wt_path.parent.mkdir(parents=True, exist_ok=True)
 
     gitignore = root / ".gitignore"

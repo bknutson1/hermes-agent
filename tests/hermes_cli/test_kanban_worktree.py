@@ -49,6 +49,58 @@ class KanbanWorktreeTests(unittest.TestCase):
             capture_output=True,
         )
 
+    def test_fetch_remote_base_ref_runs_git_fetch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            self._init_repo(repo)
+            with patch("hermes_cli.kanban_worktree.subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout="", stderr="",
+                )
+                ok = kwt.fetch_remote_base_ref(repo, "origin/main")
+            self.assertTrue(ok)
+            mock_run.assert_called_once()
+            args = mock_run.call_args[0][0]
+            self.assertEqual(args[:3], ["git", "fetch", "origin"])
+            self.assertIn("main", args)
+            self.assertIn("--prune", args)
+
+    def test_ensure_worktree_workspace_fetches_before_add(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            self._init_repo(repo)
+            wt_path = repo / ".worktrees" / "t_fetch"
+            task = kb.Task(
+                id="t_fetch",
+                title="x",
+                body=None,
+                assignee="worker",
+                status="ready",
+                priority=0,
+                created_by=None,
+                created_at=0,
+                started_at=None,
+                completed_at=None,
+                workspace_kind="worktree",
+                workspace_path=str(wt_path),
+                claim_lock=None,
+                claim_expires=None,
+                tenant=None,
+                branch_name="wt/t_fetch",
+                base_branch="origin/main",
+            )
+            with patch(
+                "hermes_cli.kanban_worktree.fetch_remote_base_ref",
+                return_value=True,
+            ) as mock_fetch:
+                kwt.ensure_worktree_workspace(task, wt_path, repo_root=repo)
+            mock_fetch.assert_called_once()
+            call_args = mock_fetch.call_args[0]
+            self.assertEqual(call_args[0], repo)
+            self.assertEqual(call_args[1], "origin/main")
+
     def test_ensure_worktree_workspace_creates_git_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
