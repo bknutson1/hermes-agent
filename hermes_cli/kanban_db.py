@@ -4047,6 +4047,16 @@ def return_task_to_ready(
             {"reason": reason} if reason else None,
             run_id=run_id,
         )
+        # Review handoff back to implementer: clear respawn guards
+        # (active_pr, recent_success) so dispatch can spawn rework on the
+        # existing branch/PR — same intent as unblock_task / operator reopen.
+        record_operator_reopen(
+            conn,
+            task_id,
+            from_status="running",
+            to_status="ready",
+            reason="request_changes",
+        )
         return True
 
 
@@ -5928,9 +5938,9 @@ def check_respawn_guard(conn: sqlite3.Connection, task_id: str) -> Optional[str]
         A GitHub PR URL appears in a recent task comment (within
         ``_RESPAWN_GUARD_PR_WINDOW`` seconds).  A prior worker already
         opened a PR; re-spawning risks a duplicate PR on the same task.
-        Cleared by ``unblock_task`` / dashboard unblock (emits
-        ``reopened``) or by moving a card from ``done``/``archived`` back
-        to an active column.
+        Cleared by ``return_task_to_ready`` (review ``request_changes``),
+        ``unblock_task`` / dashboard unblock (emits ``reopened``), or by
+        moving a card from ``done``/``archived`` back to an active column.
 
     Stale / dead claim locks are NOT a guard reason — they are handled
     by ``release_stale_claims`` and ``detect_crashed_workers`` which

@@ -10,6 +10,7 @@ Use this as the structure for PR review summary comments. Copy and fill in the s
 **Verdict: [Approved ✅ | Changes Requested 🔴 | Reviewed 💬]** ([N] issues, [N] suggestions)
 
 **PR:** https://github.com/[owner]/[repo]/pull/[number] — [title]
+**Merge status:** [MERGEABLE / CONFLICTING / BEHIND / UNKNOWN / n/a] — `head` → `base` (from `gh pr view` or local `merge-tree`; see `sdlc-review` → `references/pr-mergeability-gate.md`)
 **Author:** @[username]
 **Files changed:** [N] (+[additions] -[deletions])
 
@@ -38,7 +39,7 @@ Use this as the structure for PR review summary comments. Copy and fill in the s
 | Level | Icon | When to use | Blocks merge? |
 |-------|------|-------------|---------------|
 | Critical | 🔴 | Security vulnerabilities, data loss risk, crashes, broken core functionality | Yes |
-| Warning | ⚠️ | Bugs in non-critical paths, missing error handling, missing tests for new code | Usually yes |
+| Warning | ⚠️ | Bugs in non-critical paths, missing error handling, missing tests for new code, **PR not mergeable into base** (conflicts — merge `origin/<base>` into head) | Usually yes |
 | Suggestion | 💡 | Style improvements, refactoring ideas, performance hints, documentation gaps | No |
 | Looks Good | ✅ | Clean patterns, good test coverage, clear naming, smart design decisions | N/A |
 

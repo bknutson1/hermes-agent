@@ -26,6 +26,8 @@ The same card id cycles **review ↔ ready** until you approve. Each return to `
 
 **Suggestions (💡)** alone never trigger `kanban_request_changes`. Mention them in the comment; implementer may address optionally before human merge.
 
+**PR merge conflicts with base** are a **Warning**: `kanban_request_changes` and require the implementer to merge `origin/<base>` into the PR head branch, resolve markers, re-run tests, and push (`references/pr-mergeability-gate.md`).
+
 Use severity definitions from `github-code-review` → `references/review-output-template.md`.
 
 ## Re-review after request_changes
@@ -35,7 +37,8 @@ When `kanban_show` shows a prior review comment with Critical/Warning items:
 1. Confirm each item is **fixed in the current workspace diff** (not merely claimed in summary).
 2. If still present → list again (reference prior comment date/id if visible).
 3. Run a **fresh full review** on the whole change set — fixes can introduce regressions.
-4. Do not `kanban_block` until the new pass is Approved.
+4. Re-run the **PR mergeability gate** when a prior review requested conflict resolution.
+5. Do not `kanban_block` until the new pass is Approved.
 
 ## Comment before transition (always)
 

@@ -1,7 +1,7 @@
 ---
 name: sdlc-review
 description: Full code review on Kanban Review column — loop via kanban_request_changes until clean, then review-required block for human merge. Never merge autonomously.
-version: 2.0.1
+version: 2.0.2
 platforms: [linux, macos, windows]
 metadata:
   hermes:
@@ -47,7 +47,7 @@ On **re-review** (card returned from a prior `kanban_request_changes`), verify e
 
 1. `kanban_show()` — AC, implementer `summary`/`metadata`, prior review comments, parent handoffs.
 2. `cd $HERMES_KANBAN_WORKSPACE` — full review on the current tree (see flow doc).
-3. **Full code review** — every changed file; re-run cited tests; AC + quality bar (flow doc).
+3. **Full code review** — every changed file; re-run cited tests; AC + quality bar (flow doc). When a PR exists, run **`references/pr-mergeability-gate.md`** before Approved.
 4. `kanban_comment` with **Code Review Summary** (template) — **before** any status transition.
 5. Verdict:
    - **Changes Requested** (any Critical or Warning) → `kanban_request_changes(reason="code review: …")` — one-line reason; details in comment.
@@ -76,5 +76,6 @@ Frost Obelisk miss: `const FALL_DIR = Vector2(-1,1).normalized()` in `frost_slow
 ## Reference
 
 - `references/sdlc-review-flow.md` — orient, full review steps, platform notes, handoff
+- `references/pr-mergeability-gate.md` — PR merges cleanly into base; request changes to merge base into head when conflicted
 - `references/review-loop-and-verdict.md` — loop diagram, severity → action, re-review rules
 - `references/rogueliketd-godot-gdscript-review-gates.md` — Gates 1–4 (headless, parse smoke, tower grep, static tests)

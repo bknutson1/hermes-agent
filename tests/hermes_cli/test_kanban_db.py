@@ -1599,6 +1599,40 @@ def test_dispatch_respawn_guard_skips_recent_success(
         assert kb.get_task(conn, t).status == "ready"  # not blocked, just skipped
 
 
+def test_request_changes_clears_active_pr_respawn_guard(
+    kanban_home, all_assignees_spawnable,
+):
+    """Review agent request_changes clears active_pr so implementer can respawn."""
+    spawned_ids = []
+
+    def fake_spawn(task, workspace):
+        spawned_ids.append(task.id)
+
+    with kb.connect() as conn:
+        t = kb.create_task(conn, title="review-loop", assignee="alice")
+        kb.add_comment(
+            conn, t, "worker",
+            "PR: https://github.com/org/repo/pull/42",
+        )
+        kb.claim_task(conn, t)
+        assert kb.return_task_to_ready(
+            conn, t, reason="code review: fix tests",
+        )
+        assert kb.check_respawn_guard(conn, t) is None
+        kinds = [
+            row["kind"]
+            for row in conn.execute(
+                "SELECT kind FROM task_events WHERE task_id = ? ORDER BY id",
+                (t,),
+            ).fetchall()
+        ]
+        assert "reopened" in kinds
+        res = kb.dispatch_once(conn, spawn_fn=fake_spawn)
+
+    assert t in spawned_ids
+    assert (t, "active_pr") not in res.respawn_guarded
+
+
 def test_unblock_clears_active_pr_respawn_guard(
     kanban_home, all_assignees_spawnable,
 ):

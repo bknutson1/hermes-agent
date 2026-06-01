@@ -1,7 +1,7 @@
 ---
 name: github-code-review
 description: "Review PRs: diffs, inline comments via gh or REST."
-version: 1.1.1
+version: 1.1.3
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -313,6 +313,12 @@ When performing a code review (local or PR), systematically check:
 - Non-obvious logic has comments explaining "why"
 - README updated if behavior changed
 
+### Merge readiness (open PRs)
+- PR merges cleanly into its **base/target branch** (no unresolved conflicts with base)
+- Check: `gh pr view N --json mergeable,mergeStateStatus,baseRefName,headRefName`
+- If `CONFLICTING` / `DIRTY` / `BEHIND` with conflicts: **Warning** on Kanban SDLC review — implementer merges `origin/<base>` into head, resolves markers, re-tests, pushes. Full procedure: `sdlc-review` → `references/pr-mergeability-gate.md`
+- Record **Merge status:** in the review summary (`references/review-output-template.md`)
+
 ---
 
 ## 4. Pre-Push Review Workflow
@@ -348,6 +354,8 @@ Get the PR metadata, description, and list of changed files to understand scope 
 gh pr view 123
 gh pr diff 123 --name-only
 gh pr checks 123
+gh pr view 123 --json mergeable,mergeStateStatus,baseRefName,headRefName \
+  --jq '{mergeable,mergeStateStatus,base:.baseRefName,head:.headRefName}'
 ```
 
 **With curl:**
@@ -502,9 +510,9 @@ On every `kanban_comment` **Code Review Summary**, the **PR:** line must be the 
 | GitHub PR review | Kanban SDLC review |
 |------------------|-------------------|
 | `gh pr review --request-changes` | `kanban_request_changes` → card returns to `ready` |
-| `gh pr review --approve` | `kanban_block(review-required:…)` only after **Verdict: Approved** (0 Critical, 0 Warning) |
+| `gh pr review --approve` | **Decomposed subtask** (default when `kanban.defer_human_review_to_decompose_root` is true): `kanban_complete` → `done` after **Verdict: Approved** (0 Critical, 0 Warning). **Epic root / standalone:** `kanban_block(review-required:…)` after Approved |
 | PR comment / inline comments | `kanban_comment` (required before any status transition) |
 
-**Loop:** implementer `kanban_complete` → review → you → Critical/Warning → `kanban_request_changes` → implementer fixes → re-submit → repeat until Approved → `review-required` block for human merge. Verdict rules: `sdlc-review` → `references/review-loop-and-verdict.md`.
+**Loop:** implementer `kanban_complete` → review → you → Critical/Warning → `kanban_request_changes` → implementer fixes → re-submit → repeat until Approved → decomposed child **`done`** (default) or epic root **`review-required`** block for human merge. Verdict rules: `sdlc-review` → `references/review-loop-and-verdict.md`.
 
-Do not `kanban_block(review-required:…)` while Critical or Warning items remain. GitHub `gh pr review` is optional; the Kanban comment is authoritative for the fix loop.
+Do not `kanban_block(review-required:…)` while Critical or Warning items remain. Do not `kanban_block` on decomposed subtasks when defer-to-epic-root is enabled — the kernel auto-converts that to `done`. GitHub `gh pr review` is optional; the Kanban comment is authoritative for the fix loop.

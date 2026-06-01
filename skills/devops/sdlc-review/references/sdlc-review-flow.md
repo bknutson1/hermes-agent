@@ -10,6 +10,7 @@ You are on a card that already has an implementer run with `outcome: submitted_f
 2. `cd $HERMES_KANBAN_WORKSPACE` — diff/PR live here for worktree tasks.
 3. Confirm `HERMES_KANBAN_REVIEW=1` (review spawn). If unset, you are not the review agent.
 4. **Load `github-code-review`** — mandatory every run; use its checklist and `references/review-output-template.md` for the `kanban_comment` body.
+5. **PR URL** — if `metadata.pr` or the thread has a full `https://github.com/.../pull/N` link, note it for the mergeability gate (below).
 
 ## Full code review (required before any transition)
 
@@ -54,9 +55,18 @@ Automated greps from `github-code-review` (TODO/FIXME, secrets patterns, conflic
 | AC satisfied | Map each AC bullet to evidence in diff/tests |
 | Scope | No missing AC; call out drive-by files not in AC |
 | PR exists / matches | `metadata.pr` or `gh pr view`; workspace matches PR head |
+| PR mergeable into base | `references/pr-mergeability-gate.md` — `gh pr view` `mergeable` + `mergeStateStatus`; local `git merge-tree` if ambiguous. **Warning** + `kanban_request_changes` if conflicts — implementer merges `origin/<base>` into head, resolves, re-tests, pushes |
 | Fork PR merge base | `git log origin/main..HEAD` — note extra commits in **Residual risk** for humans |
 | Unstaged out-of-scope edits | `git status` — local experiments not in PR (see godot balance note below) |
 | Prior review findings | On re-review, each earlier Critical/Warning verified fixed |
+
+### 4b. PR mergeability gate (open PR)
+
+When a full GitHub PR URL exists, run **`references/pr-mergeability-gate.md`** before **Approved**:
+
+1. `gh pr view N --json mergeable,mergeStateStatus,baseRefName,headRefName` (or local `merge-tree` if `UNKNOWN`).
+2. Record **Merge status:** in the Code Review Summary.
+3. **Not cleanly mergeable** → **Warning**; `kanban_request_changes` — implementer `git merge origin/<base>` into head, resolve conflicts, re-run tests, `git push`.
 
 ### 5. Tests — re-run, do not trust handoff counts
 
@@ -154,6 +164,7 @@ Re-run cited tests in `tests/plugins/test_kanban_dashboard_plugin.py` with `-o a
 | Spot-check / AC-only pass | Violates full code review mandate |
 | Approve after `--quit-after 1` only on `.gd` diff | Misses lazy-loaded scripts — run `sdlc_parse_smoke.gd` when present |
 | `gh pr merge` | Out of scope unless task orders merge |
+| Approve with `mergeable: CONFLICTING` | **Warning** — request changes; implementer merges base into head |
 | Re-implementing | `kanban_request_changes`; implementer picks up from `ready` |
 | Empty `kanban_block` reason | Use `review-required:` prefix |
 
