@@ -3,8 +3,9 @@ name: remote-update
 description: >-
   Use when the user runs /remote-update — guide syncing their Hermes Agent fork
   with NousResearch/upstream via git fetch, pull, merge, conflict resolution,
-  commit, and push (all in-terminal, no scripts).
-version: 1.2.0
+  commit, and push (all in-terminal, no scripts). After a successful sync,
+  output a user-facing changelog summarizing what landed from upstream.
+version: 1.3.0
 author: Hermes Agent
 license: MIT
 metadata:
@@ -65,8 +66,14 @@ cd "$REPO" && git fetch upstream
 cd "$REPO" && git rev-list --count origin/main..upstream/main
 ```
 
-- **0** → tell user fork is already up to date with upstream; **stop**.
-- **N > 0** → note N commits to merge; continue.
+- **0** → tell user fork is already up to date with upstream; **stop** (no changelog needed).
+- **N > 0** → note N commits to merge; save the pre-merge fork tip for the changelog:
+
+  ```bash
+  cd "$REPO" && git rev-parse origin/main
+  ```
+
+  Store this as `PRE_MERGE_SHA` (e.g. `1a26c0ef2…`) — you will use it in [Changelog](#changelog-required-after-successful-sync).
 
 Verify refs exist:
 
@@ -196,7 +203,65 @@ cd "$REPO" && git push origin main
 
 ## Success
 
-Tell the user that `origin/main` now includes the upstream changes.
+Tell the user that `origin/main` now includes the upstream changes, then produce the [Changelog](#changelog-required-after-successful-sync).
+
+## Changelog (required after successful sync)
+
+After push succeeds (or after a clean merge commit is created and pushed), **always** end the session with a user-facing changelog. Do not skip this — it is the main deliverable besides the sync itself.
+
+### Gather data
+
+Use `PRE_MERGE_SHA` from step 3 (the `origin/main` tip **before** the merge). If you did not save it, use `HEAD^1` on the merge commit (first parent = pre-merge fork main).
+
+```bash
+cd "$REPO"
+# Commits brought in from upstream (second parent of the merge commit)
+git log --oneline "${PRE_MERGE_SHA}..HEAD^2"
+git log "${PRE_MERGE_SHA}..HEAD^2" --format="%h %s"
+git rev-list --count "${PRE_MERGE_SHA}..HEAD^2"
+
+# High-level diff stats (optional but helpful)
+git diff --stat "${PRE_MERGE_SHA}..HEAD^2" | tail -20
+
+# Files you had to resolve manually (if any were conflicted)
+# (recall from your conflict-resolution pass, or:)
+git diff --name-only "${PRE_MERGE_SHA}" HEAD --diff-filter=U  # empty after success
+```
+
+If the merge was a fast-forward (no merge commit), use `git log "${PRE_MERGE_SHA}..HEAD"` instead of `..HEAD^2`.
+
+### Write the changelog for the user
+
+Synthesize **real git output** into plain language. Structure it like this (omit empty sections):
+
+```
+=== Hermes upstream sync changelog ===
+Range: <PRE_MERGE_SHA short>..<upstream tip short>  (<N> commits)
+
+## Highlights
+- 3–8 bullets: the most important user-visible changes (features, fixes, breaking behavior).
+  Infer from commit subjects; group related commits. Name subsystems (TUI, gateway, dashboard, Kanban, MCP, cron, skills).
+
+## Notable changes
+- Additional bullets for smaller but still relevant items (refactors, deps, CI, docs).
+
+## Areas touched (from diff --stat)
+- Brief grouping: e.g. "web dashboard", "gateway/platforms", "hermes_cli", "plugins/kanban", "tests".
+
+## Fork merge notes (only if applicable)
+- List conflicted files you resolved and what you kept (fork vs upstream).
+- Call out fork-only behavior that survived the merge.
+
+## Breaking / action required (only if applicable)
+- Config migrations, renamed commands, new env vars, manual steps the user should take.
+```
+
+Rules:
+
+- **Be accurate** — only claim what commit messages and diffs support; do not invent features.
+- **Prioritize the user** — emphasize behavior they will notice (CLI flags, slash commands, dashboard UI, gateway platforms, model providers), not internal refactors unless large.
+- **Keep it scannable** — bullets, not walls of commit hashes. Optionally append a collapsed "All commits" list (one line per commit) at the end if N ≤ 40; if N > 40, show the first/last 10 and say "… and N−20 more".
+- **Already up to date** — if step 3 returned 0, skip this section entirely; just state the fork matches upstream.
 
 ## Failures
 
@@ -217,3 +282,4 @@ Tell the user that `origin/main` now includes the upstream changes.
 - Force-push without explicit user approval
 - Skip reporting what you did at each major step
 - Push without running [Post-merge verification](#post-merge-verification-required-before-push) when the merge touched `web/`
+- End without a [Changelog](#changelog-required-after-successful-sync) when commits were actually merged

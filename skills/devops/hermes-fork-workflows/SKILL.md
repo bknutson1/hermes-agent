@@ -36,8 +36,9 @@ Pipeline summary:
 2. If `upstream/main` ahead of `origin/main`: checkout `main`, `git pull --ff-only origin main`, `git merge upstream/main`
 3. On conflicts: agent reads each file, resolves markers, `git add`, commit, push
 4. `git push origin main`
+5. User-facing **changelog** (highlights, areas touched, fork merge notes) from upstream commits
 
-Details: `references/fork-remote-update-command.md`.
+Details: `skills/devops/remote-update/SKILL.md`.
 
 **Troubleshooting:** `couldn't find remote ref upstream` means Git looked for a branch named `upstream` on your fork (`origin`), not the `upstream` remote.
 
