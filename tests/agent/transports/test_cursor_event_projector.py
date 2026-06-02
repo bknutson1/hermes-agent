@@ -38,16 +38,46 @@ def test_streaming_deltas_do_not_create_many_assistant_rows():
     assert finalized.messages[0]["content"] == "The quick brown fox"
 
 
-def test_thinking_deltas_are_not_persisted():
+def test_thinking_deltas_stream_without_separate_rows_and_persist_on_finalize():
     projector = CursorEventProjector()
+    deltas: list[str] = []
     for word in ("Hmm", " maybe", " search"):
         out = projector.project({"type": "thinking", "text": word})
         assert out.messages == []
+        if out.thinking_delta:
+            deltas.append(out.thinking_delta)
+
+    assert deltas == ["Hmm", " maybe", " search"]
 
     finalized = projector.finalize(final_text="Done.")
     assert len(finalized.messages) == 1
     assert finalized.messages[0]["content"] == "Done."
+    assert finalized.messages[0].get("reasoning_content") == "Hmm maybe search"
     assert "reasoning" not in finalized.messages[0]
+
+
+def test_assistant_thinking_blocks_emit_delta():
+    projector = CursorEventProjector()
+    first = projector.project(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "thinking", "text": "Plan: "}],
+            },
+        }
+    )
+    assert first.messages == []
+    assert first.thinking_delta == "Plan: "
+
+    second = projector.project(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "thinking", "text": "Plan: search first"}],
+            },
+        }
+    )
+    assert second.thinking_delta == "search first"
 
 
 def test_tool_call_running_then_completed():

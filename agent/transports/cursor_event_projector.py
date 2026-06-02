@@ -7,8 +7,15 @@ OpenAI-shaped ``{role, content, tool_calls, tool_call_id}`` entries that
 Cursor streams many partial ``assistant`` and ``thinking`` events per turn.
 For session persistence we buffer assistant text and emit one message on
 ``finalize()`` (using ``run.wait()``'s result when available). Tool call
-pairs are still materialized when each tool completes. Thinking is ignored
-for the persisted transcript.
+pairs are still materialized when each tool completes.
+
+Thinking/reasoning deltas are **not** emitted as separate transcript rows
+during streaming — they surface live via ``ProjectionResult.thinking_delta``
+for ``reasoning_callback`` / TUI ``reasoning.delta``. On ``finalize()``, any
+accumulated thinking is attached once as ``reasoning_content`` on the final
+assistant message so session replay (Desktop/TUI history) can show collapsible
+reasoning blocks. Ephemeral-only display without DB persistence would drop
+thinking on ``/resume``; we persist the aggregated scratchpad instead.
 """
 
 from __future__ import annotations
@@ -51,6 +58,7 @@ class ProjectionResult:
     messages: list[dict] = field(default_factory=list)
     is_tool_iteration: bool = False
     final_text: Optional[str] = None
+    thinking_delta: Optional[str] = None
 
 
 class CursorEventProjector:
@@ -59,14 +67,15 @@ class CursorEventProjector:
     def __init__(self) -> None:
         self._pending_tool_calls: dict[str, dict] = {}
         self._assistant_text_parts: list[str] = []
+        self._thinking_parts: list[str] = []
+        self._last_thinking_snapshot: str = ""
 
     def project(self, message: Any) -> ProjectionResult:
         msg = _as_dict(message)
         msg_type = str(_get(msg, "type") or "").strip().lower()
 
-        # Thinking/reasoning streams are display-only — do not persist them.
         if msg_type == "thinking":
-            return ProjectionResult()
+            return self._project_thinking(msg)
 
         if msg_type == "assistant":
             return self._project_assistant(msg)
@@ -85,12 +94,19 @@ class CursorEventProjector:
         self._assistant_text_parts.clear()
 
         content = (final_text or "").strip() or buffered
-        if not content:
+        thinking = "".join(self._thinking_parts).strip()
+        self._thinking_parts.clear()
+        self._last_thinking_snapshot = ""
+        if not content and not thinking:
             return ProjectionResult()
 
+        assistant_msg: dict[str, Any] = {"role": "assistant", "content": content or None}
+        if thinking:
+            assistant_msg["reasoning_content"] = thinking
+
         return ProjectionResult(
-            messages=[{"role": "assistant", "content": content}],
-            final_text=content,
+            messages=[assistant_msg],
+            final_text=content or None,
         )
 
     def _flush_text_buffer(self) -> str:
@@ -98,15 +114,57 @@ class CursorEventProjector:
         self._assistant_text_parts.clear()
         return text
 
+    @staticmethod
+    def _thinking_block_text(block_dict: dict[str, Any]) -> str:
+        return str(
+            _get(block_dict, "text")
+            or _get(block_dict, "thinking")
+            or _get(block_dict, "reasoning")
+            or ""
+        )
+
+    def _record_thinking_delta(self, delta: str) -> ProjectionResult:
+        if not delta:
+            return ProjectionResult()
+        self._thinking_parts.append(delta)
+        return ProjectionResult(thinking_delta=delta)
+
+    def _record_thinking_snapshot(self, snapshot: str) -> ProjectionResult:
+        if snapshot.startswith(self._last_thinking_snapshot):
+            delta = snapshot[len(self._last_thinking_snapshot) :]
+        else:
+            delta = snapshot
+        self._last_thinking_snapshot = snapshot
+        return self._record_thinking_delta(delta)
+
+    def _project_thinking(self, msg: dict) -> ProjectionResult:
+        inner = _get(msg, "message") or {}
+        if inner:
+            blocks = _get(inner, "content") or []
+            parts: list[str] = []
+            for block in blocks:
+                block_dict = _as_dict(block)
+                block_type = str(_get(block_dict, "type") or "").lower()
+                if block_type in {"thinking", "reasoning"}:
+                    parts.append(self._thinking_block_text(block_dict))
+            if parts:
+                return self._record_thinking_snapshot("".join(parts))
+        text = str(_get(msg, "text") or _get(msg, "thinking") or "")
+        if not text:
+            return ProjectionResult()
+        return self._record_thinking_delta(text)
+
     def _project_assistant(self, msg: dict) -> ProjectionResult:
         inner = _get(msg, "message") or {}
         content_blocks = _get(inner, "content") or []
         text_parts: list[str] = []
+        thinking_parts: list[str] = []
         tool_calls: list[dict] = []
         for block in content_blocks:
             block_dict = _as_dict(block)
             block_type = str(_get(block_dict, "type") or "").lower()
             if block_type in {"thinking", "reasoning"}:
+                thinking_parts.append(self._thinking_block_text(block_dict))
                 continue
             if block_type == "text":
                 text_parts.append(str(_get(block_dict, "text") or ""))
@@ -128,6 +186,10 @@ class CursorEventProjector:
                     }
                 )
 
+        thinking_result = ProjectionResult()
+        if thinking_parts:
+            thinking_result = self._record_thinking_snapshot("".join(thinking_parts))
+
         if text_parts:
             self._assistant_text_parts.extend(text_parts)
 
@@ -138,9 +200,14 @@ class CursorEventProjector:
                 "content": buffered or None,
                 "tool_calls": tool_calls,
             }
-            return ProjectionResult(messages=[assistant_msg], is_tool_iteration=True)
+            result = ProjectionResult(messages=[assistant_msg], is_tool_iteration=True)
+            if thinking_result.thinking_delta:
+                result.thinking_delta = thinking_result.thinking_delta
+            return result
 
         # Partial assistant text — buffer only; materialize in finalize().
+        if thinking_result.thinking_delta:
+            return thinking_result
         return ProjectionResult()
 
     def _project_tool_call(self, msg: dict) -> ProjectionResult:

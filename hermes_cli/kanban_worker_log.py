@@ -114,6 +114,7 @@ class CursorStreamLogger:
     def __init__(self, emit: Callable[[str], None]) -> None:
         self._emit = emit
         self._last_assistant = ""
+        self._last_thinking = ""
 
     def handle(self, message: Any) -> None:
         msg_type = str(_message_field(message, "type") or "").strip().lower()
@@ -131,6 +132,22 @@ class CursorStreamLogger:
             status = str(_message_field(message, "status") or "").strip().lower()
             if status:
                 self._emit(f"\n[tool {status}] {name}\n")
+            return
+        if msg_type == "thinking":
+            text = str(
+                _message_field(message, "text")
+                or _message_field(message, "thinking")
+                or ""
+            )
+            if not text:
+                return
+            if text.startswith(self._last_thinking):
+                delta = text[len(self._last_thinking) :]
+            else:
+                delta = text
+            if delta:
+                self._emit(delta)
+            self._last_thinking = text
             return
         if msg_type != "assistant":
             return
@@ -190,6 +207,16 @@ def wire_kanban_worker_log_callbacks(agent: Any) -> None:
             existing_thinking(text)
 
     agent.thinking_callback = _thinking_cb
+
+    existing_reasoning = getattr(agent, "reasoning_callback", None)
+
+    def _reasoning_cb(text: str) -> None:
+        if text:
+            write_active_worker_log(text)
+        if existing_reasoning is not None:
+            existing_reasoning(text)
+
+    agent.reasoning_callback = _reasoning_cb
 
 
 class task_worker_log:

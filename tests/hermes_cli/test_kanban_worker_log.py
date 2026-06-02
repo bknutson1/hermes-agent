@@ -58,6 +58,13 @@ class KanbanWorkerLogTests(unittest.TestCase):
         self.assertEqual(text.count("=== Kanban worker ("), 1)
         self.assertIn("model=composer-2.5", text)
 
+    def test_cursor_stream_logger_emits_thinking_deltas(self) -> None:
+        emitted: list[str] = []
+        logger = kwl.CursorStreamLogger(emitted.append)
+        logger.handle({"type": "thinking", "text": "Hmm"})
+        logger.handle({"type": "thinking", "text": "Hmm maybe"})
+        self.assertEqual("".join(emitted), "Hmm maybe")
+
     def test_wire_kanban_worker_log_callbacks_mirrors_events(self) -> None:
         os.environ["HERMES_KANBAN_TASK"] = "t_wire"
         self.addCleanup(os.environ.pop, "HERMES_KANBAN_TASK", None)
@@ -66,6 +73,7 @@ class KanbanWorkerLogTests(unittest.TestCase):
             stream_delta_callback=None,
             tool_progress_callback=None,
             thinking_callback=None,
+            reasoning_callback=None,
         )
         kwl.wire_kanban_worker_log_callbacks(agent)
 
@@ -81,12 +89,14 @@ class KanbanWorkerLogTests(unittest.TestCase):
             is_error=False,
         )
         agent.thinking_callback("working…")
+        agent.reasoning_callback("plan the search")
 
         text = kb.worker_log_path("t_wire").read_text(encoding="utf-8")
         self.assertIn("token", text)
         self.assertIn("[tool started] read", text)
         self.assertIn("[tool completed] read (1.5s)", text)
         self.assertIn("[progress] working…", text)
+        self.assertIn("plan the search", text)
 
     def test_wire_preserves_existing_callbacks(self) -> None:
         os.environ["HERMES_KANBAN_TASK"] = "t_preserve"

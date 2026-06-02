@@ -26,10 +26,12 @@ def _retire_cursor_session(agent) -> None:
 
 def _ensure_cursor_sdk_session(agent, *, progress_callback, tool_progress_callback) -> None:
     """Lazy-create ``CursorSDKSession`` on the agent (mirrors codex path)."""
+    reasoning_callback = getattr(agent, "reasoning_callback", None)
     if getattr(agent, "_cursor_session", None) is not None:
         session = agent._cursor_session
         if progress_callback is not None:
             session._progress_callback = progress_callback
+        session._reasoning_callback = reasoning_callback
         session._tool_progress_callback = tool_progress_callback
         return
 
@@ -43,6 +45,7 @@ def _ensure_cursor_sdk_session(agent, *, progress_callback, tool_progress_callba
         api_key=api_key,
         model=model,
         progress_callback=progress_callback,
+        reasoning_callback=reasoning_callback,
         tool_progress_callback=tool_progress_callback,
     )
 

@@ -330,6 +330,7 @@ class CursorSDKSession:
         model: str = "composer-2.5",
         on_event: Optional[Callable[[Any], None]] = None,
         progress_callback: Optional[Callable[[str], None]] = None,
+        reasoning_callback: Optional[Callable[[str], None]] = None,
         tool_progress_callback: Optional[Callable[..., None]] = None,
     ) -> None:
         self._cwd = cwd or os.getcwd()
@@ -338,6 +339,7 @@ class CursorSDKSession:
         self._model_selection = build_cursor_model_selection(self._model)
         self._on_event = on_event
         self._progress_callback = progress_callback
+        self._reasoning_callback = reasoning_callback
         self._tool_progress_callback = tool_progress_callback
         self._agent: Any = None
         self._active_tool_calls: dict[str, dict[str, Any]] = {}
@@ -363,6 +365,14 @@ class CursorSDKSession:
             return
         try:
             self._progress_callback(text)
+        except Exception:
+            pass
+
+    def _notify_reasoning(self, text: str) -> None:
+        if not text or self._reasoning_callback is None:
+            return
+        try:
+            self._reasoning_callback(text)
         except Exception:
             pass
 
@@ -781,6 +791,8 @@ class CursorSDKSession:
                         self._notify_progress(f"⚕ {status_text}")
 
                 projected = projector.project(message)
+                if projected.thinking_delta:
+                    self._notify_reasoning(projected.thinking_delta)
                 if projected.is_tool_iteration:
                     tool_iterations += 1
                 if projected.messages:

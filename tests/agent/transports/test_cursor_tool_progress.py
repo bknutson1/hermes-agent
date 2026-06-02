@@ -9,6 +9,14 @@ from agent.transports.cursor_tool_names import (
 )
 
 
+def test_notify_reasoning_forwards_to_callback():
+    captured: list[str] = []
+    session = CursorSDKSession(reasoning_callback=captured.append)
+    session._notify_reasoning("Let me think")
+    session._notify_reasoning("")
+    assert captured == ["Let me think"]
+
+
 def test_completion_prefers_started_tool_name_over_generic_default():
     session = CursorSDKSession()
     session._notify_tool_started(
