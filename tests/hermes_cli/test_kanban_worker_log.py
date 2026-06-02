@@ -65,6 +65,12 @@ class KanbanWorkerLogTests(unittest.TestCase):
         logger.handle({"type": "thinking", "text": "Hmm maybe"})
         self.assertEqual("".join(emitted), "Hmm maybe")
 
+    def test_cursor_stream_logger_skips_thinking_when_disabled(self) -> None:
+        emitted: list[str] = []
+        logger = kwl.CursorStreamLogger(emitted.append, emit_thinking=False)
+        logger.handle({"type": "thinking", "text": "Hmm maybe"})
+        self.assertEqual(emitted, [])
+
     def test_wire_kanban_worker_log_callbacks_mirrors_events(self) -> None:
         os.environ["HERMES_KANBAN_TASK"] = "t_wire"
         self.addCleanup(os.environ.pop, "HERMES_KANBAN_TASK", None)

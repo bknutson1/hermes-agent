@@ -756,7 +756,10 @@ class CursorSDKSession:
                 )
 
                 if kanban_task_id_from_env():
-                    stream_logger = CursorStreamLogger(write_active_worker_log)
+                    stream_logger = CursorStreamLogger(
+                        write_active_worker_log,
+                        emit_thinking=self._reasoning_callback is None,
+                    )
             except ImportError:
                 stream_logger = None
             for message in run.messages():

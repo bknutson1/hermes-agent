@@ -152,7 +152,7 @@ class CursorEventProjector:
         text = str(_get(msg, "text") or _get(msg, "thinking") or "")
         if not text:
             return ProjectionResult()
-        return self._record_thinking_delta(text)
+        return self._record_thinking_snapshot(text)
 
     def _project_assistant(self, msg: dict) -> ProjectionResult:
         inner = _get(msg, "message") or {}

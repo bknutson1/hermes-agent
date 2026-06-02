@@ -111,8 +111,14 @@ def _assistant_visible_text(message: Any) -> str:
 class CursorStreamLogger:
     """Write Cursor SDK stream events to a worker log sink."""
 
-    def __init__(self, emit: Callable[[str], None]) -> None:
+    def __init__(
+        self,
+        emit: Callable[[str], None],
+        *,
+        emit_thinking: bool = True,
+    ) -> None:
         self._emit = emit
+        self._emit_thinking = emit_thinking
         self._last_assistant = ""
         self._last_thinking = ""
 
@@ -134,6 +140,8 @@ class CursorStreamLogger:
                 self._emit(f"\n[tool {status}] {name}\n")
             return
         if msg_type == "thinking":
+            if not self._emit_thinking:
+                return
             text = str(
                 _message_field(message, "text")
                 or _message_field(message, "thinking")

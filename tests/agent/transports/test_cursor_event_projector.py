@@ -56,6 +56,22 @@ def test_thinking_deltas_stream_without_separate_rows_and_persist_on_finalize():
     assert "reasoning" not in finalized.messages[0]
 
 
+def test_top_level_thinking_cumulative_snapshots_dedup():
+    projector = CursorEventProjector()
+    deltas: list[str] = []
+    first = projector.project({"type": "thinking", "text": "Hmm"})
+    if first.thinking_delta:
+        deltas.append(first.thinking_delta)
+    second = projector.project({"type": "thinking", "text": "Hmm maybe"})
+    if second.thinking_delta:
+        deltas.append(second.thinking_delta)
+    assert deltas == ["Hmm", " maybe"]
+
+    finalized = projector.finalize(final_text="Done.")
+    assert len(finalized.messages) == 1
+    assert finalized.messages[0].get("reasoning_content") == "Hmm maybe"
+
+
 def test_assistant_thinking_blocks_emit_delta():
     projector = CursorEventProjector()
     first = projector.project(
