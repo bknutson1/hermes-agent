@@ -41,9 +41,11 @@ from typing import Optional
 from hermes_cli import kanban_db as kb
 from hermes_cli.config import load_config
 
+from utils import env_int
+
 HERMES_KANBAN_SPECIFY_MAX_TOKENS = max(
     1500,
-    int(os.getenv("HERMES_KANBAN_SPECIFY_MAX_TOKENS", "6000")),
+    env_int("HERMES_KANBAN_SPECIFY_MAX_TOKENS", 6000),
 )
 
 logger = logging.getLogger(__name__)
